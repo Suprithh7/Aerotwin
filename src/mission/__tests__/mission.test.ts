@@ -12,6 +12,7 @@ import {
 } from '../route';
 import { applyWeatherPreset, fetchLiveWeather, isaDevFromSurface, type WaypointWeather } from '../weather';
 import {
+  CHT_LIMIT_C,
   MISSION_AIRSPEED,
   MIN_GROUNDSPEED_MS,
   MISSION_FUEL_KG,
@@ -389,6 +390,36 @@ describe('acceptance separation', () => {
     expect(degraded.maxChtC).toBeGreaterThan(healthy.maxChtC);
     expect(degraded.completed).toBe(false);
     expect(degraded.breach?.channel).toBe('CHT');
+  });
+
+  it('keeps the healthy reference healthy when the live twin is hot', () => {
+    const wps: Waypoint[] = [
+      { id: 1, name: 'A', lat: 34.1526, lon: 77.5771, altM: 3500, loiterMin: 0 },
+      { id: 2, name: 'B', lat: 34.1726, lon: 77.5771, altM: 3500, loiterMin: 0 },
+    ];
+    const wx = applyWeatherPreset('hot-high', wps.length);
+    // The live sim while a cooling fault is being ramped on screen: heads and
+    // sump already above the limits. The comparison engine must not start there.
+    const hot = groundState(wps, wx[0].isaDevC);
+    hot.cht = hot.cht.map(() => 260);
+    hot.oilTemp = 118;
+    const res = runMonteCarlo({
+      waypoints: wps,
+      weather: wx,
+      items: [{ kind: 'cooling', cylinder: 1, severity: 0.6 }],
+      initState: hot,
+      seed: 11,
+      growthPerH: 0,
+    });
+    expect(res.healthy.maxChtC).toBeLessThan(CHT_LIMIT_C);
+    expect(res.healthy.completed).toBe(true);
+    // Both bars cover the same mission from the same start, so the degraded
+    // engine must be worse on every thermal channel, not just on CHT: a
+    // truncated or differently-seeded comparison run makes a lagging channel
+    // such as the 80 s sump look better than the healthy engine's.
+    expect(res.current.timeS).toBeCloseTo(res.healthy.timeS, 3);
+    expect(res.current.maxChtC).toBeGreaterThan(res.healthy.maxChtC);
+    expect(res.current.maxOilTC).toBeGreaterThanOrEqual(res.healthy.maxOilTC);
   });
 
   it('burns less than the loaded fuel on a standard day', () => {

@@ -85,6 +85,7 @@ export interface McResult {
   legs: LegRisk[];
   landing: LandingState;
   healthy: HealthyRun;
+  current: HealthyRun;
   factors: Factor[];
   fuelBurnMeanKgH: number;
   buildMs: number;
@@ -220,10 +221,10 @@ export function runMonteCarloPool(req: McRequest, onProgress?: ProgressFn): Prom
   const plan = planMission(req.waypoints, req.weather);
   const base = missionStartState(req);
   const drawn = drawRunSet(req, runs);
-  const healthy = healthyReference(req, plan, base);
+  const refs = comparisonRuns(req, plan);
   if (typeof Worker === 'undefined') {
     const summaries = runSetSync(req, base, drawn, onProgress);
-    return Promise.resolve(aggregate(req, plan, drawn.length, summaries, healthy, started, 1));
+    return Promise.resolve(aggregate(req, plan, drawn.length, summaries, refs, started, 1));
   }
   return new Promise((resolve) => {
     const chunks = chunkRuns(drawn, workerCount(runs));
@@ -236,10 +237,10 @@ export function runMonteCarloPool(req: McRequest, onProgress?: ProgressFn): Prom
       for (const w of workers) w.terminate();
       if (errored) {
         const fallback = runSetSync(req, base, drawn, onProgress);
-        resolve(aggregate(req, plan, drawn.length, fallback, healthy, started, 1));
+        resolve(aggregate(req, plan, drawn.length, fallback, refs, started, 1));
         return;
       }
-      resolve(aggregate(req, plan, drawn.length, summaries, healthy, started, n));
+      resolve(aggregate(req, plan, drawn.length, summaries, refs, started, n));
     };
     const workers = chunks.map((chunk) => {
       const w = new Worker(new URL('./missionWorker.ts', import.meta.url), { type: 'module' });
@@ -284,23 +285,50 @@ export function runMonteCarlo(req: McRequest, onProgress?: ProgressFn): McResult
   const plan = planMission(req.waypoints, req.weather);
   const base = missionStartState(req);
   const drawn = drawRunSet(req, runs);
-  const healthy = healthyReference(req, plan, base);
+  const refs = comparisonRuns(req, plan);
   const summaries = runSetSync(req, base, drawn, onProgress);
-  return aggregate(req, plan, drawn.length, summaries, healthy, started, 1);
+  return aggregate(req, plan, drawn.length, summaries, refs, started, 1);
 }
 
-function healthyReference(req: McRequest, plan: MissionPlan, base: EngineState): HealthyRun {
+/** One deterministic, full-length run for the side-by-side comparison bars. */
+function referenceRun(
+  req: McRequest,
+  plan: MissionPlan,
+  items: DegradationItem[],
+  initState: EngineState,
+): HealthyRun {
+  // Limits are not enforced, so every comparison run flies the whole profile.
+  // Truncating on the first breach would compare a short run against a long one
+  // and flatter whichever channel lags: a cooling-degraded engine that quits on
+  // leg 1 never warms the sump, so its oil temperature would read better than
+  // the healthy engine's.
   const r = runMission({
     plan,
-    items: [],
+    items,
     weather: req.weather,
-    initState: base,
+    initState,
     seed: req.seed >>> 0,
     growthPerH: 0,
-    checkLimits: true,
+    checkLimits: false,
     dt: MISSION_DT,
   });
   return toHealthy(r);
+}
+
+/**
+ * Healthy engine vs the engine as it is now, on the same mission. Both start
+ * from the same settled state at the first waypoint, so the only difference
+ * between the bars is the degradation acting during the flight. Inheriting the
+ * live twin's instantaneous temperatures would compare two different starts
+ * instead - and an engine already hot from a fault being ramped on screen would
+ * make the "healthy" bar hotter than healthy is.
+ */
+function comparisonRuns(req: McRequest, plan: MissionPlan) {
+  const start = missionStartState({ ...req, initState: null });
+  return {
+    healthy: referenceRun(req, plan, [], start),
+    current: referenceRun(req, plan, req.items, start),
+  };
 }
 
 function toHealthy(r: RunResult): HealthyRun {
@@ -389,7 +417,7 @@ function aggregate(
   plan: MissionPlan,
   runs: number,
   summaries: MissionRunSummary[],
-  healthy: HealthyRun,
+  refs: { healthy: HealthyRun; current: HealthyRun },
   started: number,
   workers: number,
 ): McResult {
@@ -424,7 +452,7 @@ function aggregate(
       headwindMs: l.headwindMs,
       breachFrac: ordered.length ? breaches.length / ordered.length : 0,
       limitingChannel: limiting,
-      healthyMeanPwrKw: healthy.legs[l.index]?.meanPwrKw ?? 0,
+      healthyMeanPwrKw: refs.healthy.legs[l.index]?.meanPwrKw ?? 0,
       maxChtC: median(breaches.map((b) => b.maxChtC)),
     };
   });
@@ -481,7 +509,8 @@ function aggregate(
     missionName: wps.length > 1 ? `${wps[0].name} - ${wps[wps.length - 1].name}` : 'UNPLANNED',
     legs,
     landing,
-    healthy,
+    healthy: refs.healthy,
+    current: refs.current,
     factors,
     fuelBurnMeanKgH: completed.length
       ? median(completed.map((r) => (r.fuelUsedKg / Math.max(1, r.timeS)) * 3600))

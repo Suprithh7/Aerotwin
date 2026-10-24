@@ -473,7 +473,7 @@ export default function MissionPanel() {
                     <MetricBar
                       tag="HLTHY"
                       value={mcResult.healthy.marginKg}
-                      axisMax={axisOf([mcResult.healthy.marginKg, mcResult.landing.medMarginKg])}
+                      axisMax={axisOf([mcResult.healthy.marginKg, mcResult.current.marginKg])}
                       fill="bg-steel"
                       text={`${fmtNum(mcResult.healthy.marginKg, 1)} kg`}
                     />
@@ -484,10 +484,10 @@ export default function MissionPanel() {
                   )}
                   <MetricBar
                     tag="CURR"
-                    value={mcResult.landing.medMarginKg}
-                    axisMax={axisOf([mcResult.healthy.marginKg, mcResult.landing.medMarginKg])}
+                    value={mcResult.current.marginKg}
+                    axisMax={axisOf([mcResult.healthy.marginKg, mcResult.current.marginKg])}
                     fill="bg-amber"
-                    text={`${fmtNum(mcResult.landing.medMarginKg, 1)} kg`}
+                    text={`${fmtNum(mcResult.current.marginKg, 1)} kg`}
                   />
                 </div>
               </div>
@@ -504,10 +504,10 @@ export default function MissionPanel() {
                   />
                   <MetricBar
                     tag="CURR"
-                    value={mcResult.landing.medChtMaxC}
+                    value={mcResult.current.maxChtC}
                     axisMax={CHT_LIMIT_C}
                     fill="bg-amber"
-                    text={`${fmtNum(mcResult.landing.medChtMaxC, 1)} C`}
+                    text={`${fmtNum(mcResult.current.maxChtC, 1)} C`}
                   />
                 </div>
               </div>
@@ -524,10 +524,10 @@ export default function MissionPanel() {
                   />
                   <MetricBar
                     tag="CURR"
-                    value={mcResult.landing.medOilTC}
+                    value={mcResult.current.maxOilTC}
                     axisMax={OILT_LIMIT_C}
                     fill="bg-amber"
-                    text={`${fmtNum(mcResult.landing.medOilTC, 1)} C`}
+                    text={`${fmtNum(mcResult.current.maxOilTC, 1)} C`}
                   />
                 </div>
               </div>
