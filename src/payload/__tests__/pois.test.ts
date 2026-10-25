@@ -61,6 +61,23 @@ describe('recon points of interest', () => {
     }
   });
 
+  it('captures in route order, not by proximity to a later node', () => {
+    const { mission, wps, plan } = planFor('ladakh');
+    const scheduled = schedulePois(poisForMission(mission), plan, wps);
+    for (let i = 1; i < scheduled.length; i++) {
+      expect(scheduled[i].id).toBe(scheduled[i - 1].id + 1);
+      expect(
+        scheduled[i].captureAtS!,
+        `item ${scheduled[i].id} must not overtake item ${scheduled[i - 1].id}`,
+      ).toBeGreaterThanOrEqual(scheduled[i - 1].captureAtS!);
+    }
+    // PHEY is the last RECON node but sits within 3 km of the outbound leg.
+    // It may only be captured on the leg into its own waypoint (leg 7).
+    const phey = scheduled.find((p) => p.anchor === 'PHEY')!;
+    const at = positionAtClock(plan, wps, phey.captureAtS!);
+    expect(at!.legIndex).toBe(7);
+  });
+
   it('captures inside the 3 km radius and not before', () => {
     const { mission, wps, plan } = planFor('ladakh');
     const scheduled = schedulePois(poisForMission(mission), plan, wps);
@@ -88,6 +105,7 @@ describe('dummy recon payload', () => {
     priority: 1,
     lat: 34.12,
     lon: 77.1,
+    routeIndex: 3,
     anchor: 'SHAM',
   };
 

@@ -27,12 +27,14 @@ export interface PoiSpec {
   priority: PayloadPriority;
   lat: number;
   lon: number;
+  /** 0-based index of the RECON node this item belongs to in the route. */
+  routeIndex: number;
   /** Route feature the point sits beside, for the briefing and tests. */
   anchor: string;
 }
 
 export interface ScheduledPoi extends PoiSpec {
-  /** Mission clock when the aircraft first comes within the capture radius. */
+  /** Mission clock of the ordered capture, or null if it was never due. */
   captureAtS: number | null;
 }
 

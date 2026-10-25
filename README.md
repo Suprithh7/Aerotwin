@@ -59,8 +59,9 @@ without resetting the run.
 ## Data Guard
 
 One recon item is generated per RECON node in the mission, seeded from the
-mission, node id and node name. When the aircraft passes within 3 km, the item
-(IMAGE or VIDEO, size, priority 1-3) is encrypted with AES-256-GCM and stored as
+mission, node id and node name. Items are collected in route order: on the leg
+into its own waypoint, when the aircraft passes within 3 km, the item (IMAGE or
+VIDEO, size, priority 1-3) is encrypted with AES-256-GCM and stored as
 ciphertext with the SHA-256 of its plaintext. While the simulated link is up the item is sent highest priority
 first; the ground station decrypts it and checks the hash before it counts as
 secured.

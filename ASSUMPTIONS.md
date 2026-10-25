@@ -849,9 +849,12 @@ is invented to fill that gap.
   captures the same manifest.
 - **Sizes:** IMAGE **15-60 MB**, VIDEO **150-600 MB**. These are assumed
   reconnaissance-product sizes, not sensor-format arithmetic.
-- **Capture:** the first route sample within **3 000 m** of the site captures
-  the item. The route is sampled every **5 mission seconds**, so the capture
-  timestamp is a mission-clock value, not sim time.
+- **Capture:** items are collected in route order. A RECON item becomes
+  eligible on the leg into its own waypoint and captures at the first route
+  sample within **3 000 m** of the site, and only after every earlier RECON
+  item; a later node that sits near an earlier leg is not collected by
+  proximity. The route is sampled every **5 mission seconds**, so capture
+  timestamps are mission-clock values, not sim time.
 - The encrypted object is a deterministic dummy: a readable four-line header
   plus seeded random bytes at **1:100000** of the nominal size, floor **192 B**.
   Every transfer, counter and capacity figure uses the nominal MB, never the

@@ -41,11 +41,13 @@ function priorityOf(roll: number): PayloadPriority {
  * sub-kilometre offset, so a mission always sees the same items.
  */
 export function poisForMission(mission: Mission): PoiSpec[] {
-  const nodes = mission.nodes.filter((n) => n.type === 'RECON');
+  const nodes = mission.nodes
+    .map((node, routeIndex) => ({ node, routeIndex }))
+    .filter(({ node }) => node.type === 'RECON');
   const seedBase = `${mission.templateId ?? mission.id}:${mission.id}`;
   const out: PoiSpec[] = [];
   for (let i = 0; i < nodes.length; i++) {
-    const node = nodes[i];
+    const { node, routeIndex } = nodes[i];
     const rng = mulberry32(hashString(`${seedBase}:${node.id}:${node.name}`));
     const type: PayloadType = rng() < 0.55 ? 'VIDEO' : 'IMAGE';
     const baseMB = type === 'VIDEO' ? 280 + rng() * 300 : 28 + rng() * 34;
@@ -58,6 +60,7 @@ export function poisForMission(mission: Mission): PoiSpec[] {
       priority: priorityOf(rng()),
       lat,
       lon,
+      routeIndex,
       anchor: node.name,
     });
   }
@@ -65,9 +68,10 @@ export function poisForMission(mission: Mission): PoiSpec[] {
 }
 
 /**
- * First mission-clock time each site comes inside the capture radius. The plan
- * is sampled at the same cadence the rehearsal clock uses for the marker, so a
- * loiter hold yields a capture as soon as the aircraft arrives.
+ * Ordered capture times. Items are scheduled by route order: a site becomes
+ * eligible on the leg that leads into its own waypoint, and only after every
+ * earlier RECON item has been captured. A later node that happens to lie near
+ * an earlier leg is therefore never collected by proximity.
  */
 export function schedulePois(
   pois: PoiSpec[],
@@ -75,21 +79,29 @@ export function schedulePois(
   wps: Waypoint[],
 ): ScheduledPoi[] {
   const out: ScheduledPoi[] = pois.map((p) => ({ ...p, captureAtS: null }));
-  if (wps.length < 2 || !(plan.totalS > 0)) return out;
-  let remaining = out.length;
-  const visit = (clockS: number): void => {
-    if (remaining <= 0) return;
-    const pos = positionAtClock(plan, wps, clockS);
-    if (!pos) return;
-    for (const poi of out) {
-      if (poi.captureAtS !== null) continue;
+  if (wps.length < 2 || !(plan.totalS > 0) || out.length === 0) return out;
+
+  const times: number[] = [];
+  for (let t = 0; t <= plan.totalS; t += CAPTURE_SAMPLE_S) times.push(t);
+  if (times[times.length - 1] !== plan.totalS) times.push(plan.totalS);
+  const positions = times.map((t) => positionAtClock(plan, wps, t));
+
+  let from = 0;
+  for (const poi of out) {
+    // Leg into the site's own waypoint; the first waypoint is eligible at T+0.
+    const ownLeg = Math.max(0, Math.min(poi.routeIndex - 1, wps.length - 2));
+    for (let i = from; i < times.length; i++) {
+      const pos = positions[i];
+      if (!pos) continue;
+      if (poi.routeIndex > 0 && pos.legIndex < ownLeg) continue;
       if (distanceM(pos.lat, pos.lon, poi.lat, poi.lon) <= CAPTURE_RADIUS_M) {
-        poi.captureAtS = clockS;
-        remaining--;
+        poi.captureAtS = times[i];
+        from = i;
+        break;
       }
     }
-  };
-  for (let t = 0; t <= plan.totalS; t += CAPTURE_SAMPLE_S) visit(t);
-  visit(plan.totalS);
+    // Never let a later item overtake one that could not be captured.
+    if (poi.captureAtS === null) break;
+  }
   return out;
 }
