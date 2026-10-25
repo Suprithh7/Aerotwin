@@ -180,6 +180,44 @@ export function clonePreset(id: string): Waypoint[] {
   return p.waypoints.map((w) => ({ ...w }));
 }
 
+/**
+ * Hand edits are confined to a box around the selected preset's waypoint
+ * bounding box, expanded by this many degrees on every side (see ASSUMPTIONS.md).
+ */
+export const PRESET_EDIT_MARGIN_DEG = 2;
+
+export interface GeoBox {
+  minLat: number;
+  maxLat: number;
+  minLon: number;
+  maxLon: number;
+}
+
+export function presetEditBox(presetId: string): GeoBox {
+  const p = presetById(presetId) ?? ROUTE_PRESETS[0];
+  const lats = p.waypoints.map((w) => w.lat);
+  const lons = p.waypoints.map((w) => w.lon);
+  const m = PRESET_EDIT_MARGIN_DEG;
+  return {
+    minLat: Math.min(...lats) - m,
+    maxLat: Math.max(...lats) + m,
+    minLon: Math.min(...lons) - m,
+    maxLon: Math.max(...lons) + m,
+  };
+}
+
+/** Clamp a hand-placed point to the preset edit box; reports whether it moved. */
+export function clampToPresetBox(
+  presetId: string,
+  lat: number,
+  lon: number,
+): { lat: number; lon: number; clamped: boolean } {
+  const b = presetEditBox(presetId);
+  const cLat = Math.min(b.maxLat, Math.max(b.minLat, lat));
+  const cLon = Math.min(b.maxLon, Math.max(b.minLon, lon));
+  return { lat: cLat, lon: cLon, clamped: cLat !== lat || cLon !== lon };
+}
+
 /** Interpolated position along a route for the live monitor marker. */
 export interface TrackPoint {
   lat: number;

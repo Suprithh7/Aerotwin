@@ -65,6 +65,7 @@ function NumberCell({
   step,
   onCommit,
   title,
+  disabled,
 }: {
   value: number;
   min?: number;
@@ -72,6 +73,7 @@ function NumberCell({
   step?: number;
   onCommit: (n: number) => void;
   title?: string;
+  disabled?: boolean;
 }) {
   return (
     <input
@@ -82,6 +84,7 @@ function NumberCell({
       max={max}
       step={step}
       title={title}
+      disabled={disabled}
       className="w-full font-mono num"
       onChange={(e) => {
         const raw = e.target.value;
@@ -137,6 +140,8 @@ function verdictClass(verdict: string): string {
 export default function MissionPanel() {
   const waypoints = useMissionStore((s) => s.waypoints);
   const routePresetId = useMissionStore((s) => s.routePresetId);
+  const routeBasePresetId = useMissionStore((s) => s.routeBasePresetId);
+  const routeEditMode = useMissionStore((s) => s.routeEditMode);
   const weatherPresetId = useMissionStore((s) => s.weatherPresetId);
   const weather = useMissionStore((s) => s.weather);
   const wxNotice = useMissionStore((s) => s.wxNotice);
@@ -150,6 +155,8 @@ export default function MissionPanel() {
   const mcError = useMissionStore((s) => s.mcError);
 
   const setRoute = useMissionStore((s) => s.setRoute);
+  const setRouteEditMode = useMissionStore((s) => s.setRouteEditMode);
+  const resetPreset = useMissionStore((s) => s.resetPreset);
   const setWaypointAlt = useMissionStore((s) => s.setWaypointAlt);
   const setWaypointLoiter = useMissionStore((s) => s.setWaypointLoiter);
   const deleteWaypoint = useMissionStore((s) => s.deleteWaypoint);
@@ -197,6 +204,23 @@ export default function MissionPanel() {
             </button>
           ))}
         </div>
+        <div className="mt-2 flex gap-1">
+          <button
+            className={routeEditMode ? 'active' : ''}
+            aria-pressed={routeEditMode}
+            onClick={() => setRouteEditMode(!routeEditMode)}
+          >
+            {routeEditMode ? 'EDIT ROUTE: ON' : 'EDIT ROUTE'}
+          </button>
+          <button title={`Restore the ${routeBasePresetId} preset`} onClick={() => resetPreset()}>
+            RESET PRESET
+          </button>
+        </div>
+        <div className={`mt-1 font-mono ${routeEditMode ? 'text-amber' : 'text-dim'}`}>
+          {routeEditMode
+            ? 'EDITING - CLICK MAP TO ADD, DRAG TO MOVE, DEL TO REMOVE'
+            : 'LOCKED - ROUTE IS READ-ONLY UNTIL EDIT ROUTE IS ON'}
+        </div>
       </Section>
 
       <Section title="Waypoints">
@@ -229,6 +253,7 @@ export default function MissionPanel() {
                 value={w.altM}
                 min={0}
                 step={50}
+                disabled={!routeEditMode}
                 title="Leg cruise altitude, m AMSL"
                 onCommit={(n) => setWaypointAlt(w.id, n)}
               />
@@ -236,6 +261,7 @@ export default function MissionPanel() {
                 value={w.loiterMin}
                 min={0}
                 step={5}
+                disabled={!routeEditMode}
                 title="Station-keeping hold, minutes"
                 onCommit={(n) => setWaypointLoiter(w.id, n)}
               />
@@ -243,12 +269,16 @@ export default function MissionPanel() {
           ))}
         </div>
         <div className="mt-1 flex items-center justify-between gap-2">
-          <span className="text-dim">Position edits: drag on the map; lat/lon here are read-only.</span>
+          <span className="text-dim">
+            {routeEditMode
+              ? 'Waypoint edits are clamped to the preset region.'
+              : 'Enable EDIT ROUTE to change position, altitude or loiter.'}
+          </span>
           <div className="flex gap-1">
             {waypoints.map((w) => (
               <button
                 key={`${w.id}-del`}
-                disabled={waypoints.length <= 2}
+                disabled={!routeEditMode || waypoints.length <= 2}
                 title={`Delete ${w.name}`}
                 onClick={() => deleteWaypoint(w.id)}
               >

@@ -447,12 +447,18 @@ export default function MissionMap({
   const storeWaypoints = useMissionStore((s) => s.waypoints);
   const storeWeather = useMissionStore((s) => s.weather);
   const presetId = useMissionStore((s) => s.routePresetId);
+  const editMode = useMissionStore((s) => s.routeEditMode);
+  const routeNotice = useMissionStore((s) => s.routeNotice);
+  const dismissRouteNotice = useMissionStore((s) => s.dismissRouteNotice);
   const storeLegs = useMissionStore((s) => s.mcResult?.legs);
   const waypoints = waypointsProp ?? storeWaypoints;
   const weather = weatherProp ?? storeWeather;
   const risk = legRisk ?? (storeLegs ? storeLegs.map((l) => l.breachFrac) : NO_RISK);
 
   const monitor = mode === 'monitor';
+  // The rail map on the live-monitor tab is read-only even when the mission
+  // tab has route editing switched on.
+  const editable = editMode && !monitor;
   const liveT = useSimStore((s) => (monitor ? (s.snapshot?.t ?? 0) : 0));
 
   const [internalSelected, setInternalSelected] = useState<number | null>(null);
@@ -507,8 +513,8 @@ export default function MissionMap({
   const clickGuardRef = useRef(false);
   const readyRef = useRef(false);
   const viewRef = useRef({ presetId, count: waypoints.length });
-  const dataRef = useRef({ waypoints, risk, track, selected, cp, nav, pos, presetId });
-  dataRef.current = { waypoints, risk, track, selected, cp, nav, pos, presetId };
+  const dataRef = useRef({ waypoints, risk, track, selected, cp, nav, pos, presetId, editable });
+  dataRef.current = { waypoints, risk, track, selected, cp, nav, pos, presetId, editable };
   const selectRef = useRef(select);
   selectRef.current = select;
 
@@ -685,9 +691,11 @@ export default function MissionMap({
       clickGuardRef.current = false;
       const wp = hitWp(e);
       if (wp === null) return;
+      selectRef.current(wp);
+      // A locked preset can be inspected but not moved.
+      if (!dataRef.current.editable) return;
       dragRef.current = { id: wp, x: e.point.x, y: e.point.y, moved: false };
       map.dragPan.disable();
-      selectRef.current(wp);
       container.focus();
     };
     const onDrag = (e: MapMouseEvent) => {
@@ -718,10 +726,16 @@ export default function MissionMap({
         showAirfieldPopup(popupRef, map, AIRFIELDS[af]);
         return;
       }
-      useMissionStore.getState().addWaypoint(e.lngLat.lat, e.lngLat.lng);
+      // Empty-map clicks only add waypoints while route editing is enabled.
+      if (dataRef.current.editable) {
+        useMissionStore.getState().addWaypoint(e.lngLat.lat, e.lngLat.lng);
+      } else {
+        selectRef.current(null);
+      }
     };
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key !== 'Delete' && ev.key !== 'Backspace') return;
+      if (!dataRef.current.editable) return;
       const id = dataRef.current.selected;
       if (id === null) return;
       ev.preventDefault();
@@ -846,6 +860,13 @@ export default function MissionMap({
     pushAll();
   });
 
+  // A clamp warning is transient; it clears itself so it cannot mask the map.
+  useEffect(() => {
+    if (!routeNotice) return;
+    const timer = window.setTimeout(dismissRouteNotice, 4000);
+    return () => window.clearTimeout(timer);
+  }, [routeNotice, dismissRouteNotice]);
+
   // A preset choice flies to its region; adding or removing waypoints re-frames
   // in place. The opening camera stays on the India overview.
   useEffect(() => {
@@ -877,7 +898,9 @@ export default function MissionMap({
         ) : null}
         {sel ? (
           <span className={sel.id === selected ? styles.sel : undefined}>
-            {`SEL ${sel.name} ${fmtAltM(sel.altM)} - ${sel.lat.toFixed(4)} ${sel.lon.toFixed(4)} - DEL REMOVES`}
+            {`SEL ${sel.name} ${fmtAltM(sel.altM)} - ${sel.lat.toFixed(4)} ${sel.lon.toFixed(4)}${
+              editable ? ' - DEL REMOVES' : ''
+            }`}
           </span>
         ) : null}
       </div>
@@ -899,6 +922,11 @@ export default function MissionMap({
             </div>
           ) : null}
           {noneReachable ? <div className={styles.crit}>NO REACHABLE ALTERNATE</div> : null}
+        </div>
+      ) : null}
+      {routeNotice ? (
+        <div className={styles.toast} role="status">
+          {routeNotice}
         </div>
       ) : null}
       <div className={styles.note}>Illustrative map. Boundaries not depicted.</div>

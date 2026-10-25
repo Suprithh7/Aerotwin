@@ -9,13 +9,16 @@ import {
   type MissionPlan,
 } from './mission';
 import { runMonteCarloPool, type McRequest, type McResult } from './monteCarlo';
-import { clonePreset, presetById, ROUTE_PRESETS, renameWaypoints, type Waypoint } from './route';
+import { clonePreset, clampToPresetBox, presetById, ROUTE_PRESETS, renameWaypoints, type Waypoint } from './route';
 import { applyWeatherPreset, fetchLiveWeather, WEATHER_PRESETS, type WeatherCell, type WaypointWeather } from './weather';
 import { useSimStore } from '../state/store';
 
 export interface MissionStore {
   waypoints: Waypoint[];
   routePresetId: string;
+  routeBasePresetId: string;
+  routeEditMode: boolean;
+  routeNotice: string | null;
   weatherPresetId: string;
   weather: WeatherCell[];
   wxNotice: string | null;
@@ -28,6 +31,9 @@ export interface MissionStore {
   mcResult: McResult | null;
   mcError: string | null;
   setRoute: (presetId: string) => void;
+  setRouteEditMode: (on: boolean) => void;
+  resetPreset: () => void;
+  dismissRouteNotice: () => void;
   addWaypoint: (lat: number, lon: number) => void;
   moveWaypoint: (id: number, lat: number, lon: number) => void;
   setWaypointAlt: (id: number, altM: number) => void;
@@ -75,9 +81,17 @@ export function missionHealthInput(): { items: DegradationItem[]; state: McReque
 
 export const useMissionStore = create<MissionStore>((set, get) => {
   const first = ROUTE_PRESETS[0];
+  const clampNotice = 'WAYPOINT CLAMPED TO PRESET REGION (+/-2 DEG)';
+  const editGuard = () => get().routeEditMode;
+  const flagClamp = (clamped: boolean) => {
+    if (clamped) set({ routeNotice: clampNotice });
+  };
   return {
     waypoints: first.waypoints.map((w) => ({ ...w })),
     routePresetId: first.id,
+    routeBasePresetId: first.id,
+    routeEditMode: false,
+    routeNotice: null,
     weatherPresetId: first.suggestedWeather,
     weather: cellsFromPreset(first.suggestedWeather, first.waypoints.length),
     wxNotice: null,
@@ -97,19 +111,41 @@ export const useMissionStore = create<MissionStore>((set, get) => {
       set({
         waypoints: wps,
         routePresetId: presetId,
+        routeBasePresetId: presetId,
+        routeEditMode: false,
+        routeNotice: null,
         weather: syncWeatherLength(get().weather, get().weatherPresetId, wps.length),
         mcResult: null,
       });
     },
 
+    setRouteEditMode: (on) => set({ routeEditMode: on, routeNotice: on ? get().routeNotice : null }),
+
+    resetPreset: () => {
+      const base = get().routeBasePresetId;
+      const wps = clonePreset(base);
+      set({
+        waypoints: wps,
+        routePresetId: base,
+        routeEditMode: false,
+        routeNotice: null,
+        weather: syncWeatherLength(get().weather, get().weatherPresetId, wps.length),
+        mcResult: null,
+      });
+    },
+
+    dismissRouteNotice: () => set({ routeNotice: null }),
+
     addWaypoint: (lat, lon) => {
+      if (!editGuard()) return;
       const wps = get().waypoints;
       const last = wps[wps.length - 1];
+      const p = clampToPresetBox(get().routeBasePresetId, lat, lon);
       const wp: Waypoint = {
         id: ++wpId,
         name: `WP${wps.length + 1}`,
-        lat,
-        lon,
+        lat: p.lat,
+        lon: p.lon,
         altM: last ? last.altM : 3000,
         loiterMin: 0,
       };
@@ -120,19 +156,25 @@ export const useMissionStore = create<MissionStore>((set, get) => {
         weather: syncWeatherLength(get().weather, get().weatherPresetId, next.length),
         mcResult: null,
       });
+      flagClamp(p.clamped);
     },
 
     moveWaypoint: (id, lat, lon) => {
-      const next = get().waypoints.map((w) => (w.id === id ? { ...w, lat, lon } : w));
+      if (!editGuard()) return;
+      const p = clampToPresetBox(get().routeBasePresetId, lat, lon);
+      const next = get().waypoints.map((w) => (w.id === id ? { ...w, lat: p.lat, lon: p.lon } : w));
       set({ waypoints: next, routePresetId: 'custom', mcResult: null });
+      flagClamp(p.clamped);
     },
 
     setWaypointAlt: (id, altM) => {
+      if (!editGuard()) return;
       const next = get().waypoints.map((w) => (w.id === id ? { ...w, altM: Math.max(0, Math.round(altM)) } : w));
       set({ waypoints: next, routePresetId: 'custom', mcResult: null });
     },
 
     setWaypointLoiter: (id, minutes) => {
+      if (!editGuard()) return;
       const next = get().waypoints.map((w) =>
         w.id === id ? { ...w, loiterMin: Math.max(0, Math.round(minutes)) } : w,
       );
@@ -140,6 +182,7 @@ export const useMissionStore = create<MissionStore>((set, get) => {
     },
 
     deleteWaypoint: (id) => {
+      if (!editGuard()) return;
       const next = renameWaypoints(get().waypoints.filter((w) => w.id !== id));
       if (next.length < 2) return;
       set({

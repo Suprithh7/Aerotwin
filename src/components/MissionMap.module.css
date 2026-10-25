@@ -122,6 +122,26 @@
   pointer-events: none;
 }
 
+/* Clamp warning: transient, above the attribution strip and clear of the
+   top-left navcard. */
+.toast {
+  position: absolute;
+  right: 8px;
+  bottom: 20px;
+  z-index: 3;
+  max-width: min(420px, 70%);
+  padding: 3px 8px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  line-height: 14px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #c9922e;
+  background-color: #11151a;
+  border: 1px solid #c9922e;
+  pointer-events: none;
+}
+
 /* --- airfield popup ----------------------------------------------------- */
 .pop {
   font-family: 'IBM Plex Mono', monospace;

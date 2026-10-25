@@ -155,6 +155,16 @@ territory, away from the international border and the Line of Control.
 | HOT DAY — Thar desert, Rajasthan | VIJO / VIJR / VIBK, VIJP, VAUD, VABJ | JODHPUR 219 → THAR 3800/150m → POKHRAN 4000/120m → JAISALMER 229/90m | 0.2-4.0 km | 6 h |
 | HEADWIND — west coast | VABB / VOCI / VOGO, VOML, VAKP | MUMBAI 12 → GOA 3800 → MANGALURU 4000 → KOCHI 9 | 0.0-4.0 km | none (coastal over-water track, headwind preset carries the risk) |
 
+### Hand-edited routes — `src/mission/route.ts:187-219`, `src/mission/missionStore.ts:122-177`
+Presets open **locked**: add, move, delete, altitude and loiter edits are
+ignored until EDIT ROUTE is switched on. Selecting a preset or pressing RESET
+PRESET locks the route again; RESET PRESET reinstates the preset the route was
+last based on. New and dragged waypoints are clamped to that preset's waypoint
+bounding box expanded by **±2° on each side** (`PRESET_EDIT_MARGIN_DEG = 2`,
+`route.ts:187`), and a transient amber toast reports any clamp. The box is a
+safety rail that keeps a hand-edited route in the preset's region; it is not
+operational airspace and does not model terrain or borders.
+
 ## Mission profile — `src/mission/constants.ts`
 Segment sequence is takeoff → (climb/descent) → cruise → loiter → … → descent →
 landing. All speeds and rates are assumed constants:
