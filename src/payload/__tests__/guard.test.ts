@@ -141,6 +141,19 @@ describe('Data Guard decision table', () => {
     expect(d.reason).toContain('Data stays encrypted onboard');
   });
 
+  it('names a reachable custom site by its own name, not its synthetic id', () => {
+    const custom = row('SITE-7', 'REACHABLE', 1000);
+    custom.airfield = {
+      icao: 'SITE-7',
+      name: 'Site 1',
+      custom: true,
+    } as AlternateRow['airfield'];
+    const d = decide({ alternates: [custom] });
+    expect(d.state).toBe('STANDBY');
+    expect(d.reason).toContain('Site 1 is reachable');
+    expect(d.reason).not.toContain('SITE-7');
+  });
+
   it('never arms for a reachable alternate even over denied territory', () => {
     const d = decide({
       alternates: [row('VISR', 'MARGINAL', 1000), row('VIJU', 'REACHABLE', 500)],

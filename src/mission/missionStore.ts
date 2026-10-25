@@ -790,7 +790,7 @@ export const useMissionStore = create<MissionStore>((set, get) => {
       const sites = get().mission.customSites;
       const site: LandingSite = {
         id: nextItemId(sites),
-        name: `LANDING SITE ${sites.length + 1}`,
+        name: `Site ${sites.length + 1}`,
         type: 'STRIP',
         lat,
         lon,

@@ -13,7 +13,7 @@ import {
   poweredRangeM,
   type NavState,
 } from '../alternates';
-import { airfieldByIcao, type Airfield } from '../../data/airfields';
+import { airfieldByIcao, airfieldLabel, siteAsAirfield, type Airfield } from '../../data/airfields';
 import { EARTH_RADIUS_M, bearingDeg, distanceM, windComponents } from '../../mission/route';
 import { PWR_MARGIN_FRAC } from '../../mission/constants';
 
@@ -59,6 +59,25 @@ function stateAt(over: Partial<NavState> = {}): NavState {
     ...over,
   };
 }
+
+describe('airfield labels', () => {
+  test('shows a bundled ICAO and a custom site name, never the synthetic id', () => {
+    const visr = airfieldByIcao('VISR');
+    expect(visr).toBeDefined();
+    expect(airfieldLabel(visr!)).toBe('VISR');
+
+    const site = siteAsAirfield({
+      id: 2001,
+      name: 'Leh Valley Strip',
+      type: 'STRIP',
+      lat: LEH.lat,
+      lon: LEH.lon,
+      elevM: 3300,
+    });
+    expect(site.icao).toBe('SITE-2001');
+    expect(airfieldLabel(site)).toBe('Leh Valley Strip');
+  });
+});
 
 describe('route geometry', () => {
   test('Leh to Srinagar is 256 km within two percent', () => {

@@ -20,6 +20,8 @@ export interface Airfield {
   lon: number;
   elevationM: number;
   type: AirfieldType;
+  /** True for operator-added landing sites, which have no published ICAO. */
+  custom?: boolean;
 }
 
 export const AIRFIELDS = raw as Airfield[];
@@ -50,9 +52,16 @@ export function siteAsAirfield(site: LandingSite): Airfield {
     lon: site.lon,
     elevationM: site.elevM,
     type: 'small_airport',
+    custom: true,
   };
 }
 
 export function alternatesForSites(sites: LandingSite[]): Airfield[] {
   return sites.map(siteAsAirfield);
+}
+
+/** Operator-facing label: a custom site's own name, otherwise the ICAO. */
+export function airfieldLabel(a: Airfield): string {
+  const name = a.custom ? (a.name ?? '').trim() : '';
+  return name || a.icao;
 }

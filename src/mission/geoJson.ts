@@ -207,9 +207,10 @@ export function missionFromGeoJson(text: string): { mission: Mission | null; err
     )
     .map((f, i) => {
       const p = (f.properties ?? {}) as Record<string, unknown>;
+      const rawName = typeof p.name === 'string' ? p.name.trim() : '';
       return {
         id: isFiniteNum(p.id) ? p.id : 200 + i,
-        name: typeof p.name === 'string' ? p.name : `SITE ${i + 1}`,
+        name: rawName || `Site ${i + 1}`,
         type: SITE_TYPES.includes(p.siteType as SiteType) ? (p.siteType as SiteType) : 'STRIP',
         lat: f.geometry.coordinates[1],
         lon: f.geometry.coordinates[0],

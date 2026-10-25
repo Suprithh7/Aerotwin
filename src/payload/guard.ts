@@ -3,6 +3,7 @@
 // landing keeps the data encrypted onboard, and erase needs both an engine
 // fault and a predicted loss inside the denied area.
 import { GLIDE_RATIO, type AlternateRow } from '../nav/alternates';
+import { airfieldLabel } from '../data/airfields';
 import { REHEARSAL_SIM_SPAN_S } from '../rehearsal/clock';
 import type { MissionZone } from '../mission/types';
 import type { OffloadFit } from './offload';
@@ -187,7 +188,7 @@ export function decideGuard(input: GuardInput): GuardDecision {
   if (reachable) {
     return {
       state: 'STANDBY',
-      reason: `${input.faultText} ${reachable.airfield.icao} is reachable. Data stays encrypted onboard and offload continues.`,
+      reason: `${input.faultText} ${airfieldLabel(reachable.airfield)} is reachable. Data stays encrypted onboard and offload continues.`,
       action: 'NONE',
       eraseReason: null,
       timeToLossS,

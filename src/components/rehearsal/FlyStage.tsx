@@ -9,6 +9,7 @@ import { resolveWaypoints } from '../../mission/terrain';
 import { engineProfileById, type GaugeId } from '../../mission/types';
 import { useAlternates } from '../../nav/useAlternates';
 import type { AlternateRow } from '../../nav/alternates';
+import { airfieldLabel } from '../../data/airfields';
 import { useRehearsalStore } from '../../rehearsal/store';
 import {
   REHEARSAL_SIM_SPAN_S,
@@ -392,6 +393,7 @@ export default function FlyStage() {
   }, [ready, missionS, waypoints, weather]);
   const nav = useAlternates(pos, mission);
   const nearest = nav.nearest;
+  const nearestLabel = nearest ? airfieldLabel(nearest.airfield) : null;
   navRowsRef.current = nav.rows;
 
   const hud = hudStatus(shownSnap, diagnosis, script, injected);
@@ -498,10 +500,13 @@ export default function FlyStage() {
             {nearest ? (
               <>
                 <div className="mt-1 flex items-baseline justify-between gap-2">
-                  <span className="font-mono text-[13px] tracking-[0.04em] text-ink">
-                    {nearest.airfield.icao}
+                  <span
+                    className="min-w-0 truncate font-mono text-[13px] tracking-[0.04em] text-ink"
+                    title={nearestLabel ?? undefined}
+                  >
+                    {nearestLabel}
                   </span>
-                  <span className="flex items-center gap-1.5 font-mono text-[11px] text-ink">
+                  <span className="flex shrink-0 items-center gap-1.5 font-mono text-[11px] text-ink">
                     <span
                       className="h-2 w-2"
                       style={{

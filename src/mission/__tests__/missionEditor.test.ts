@@ -377,6 +377,31 @@ describe('zone and search editing', () => {
   });
 });
 
+describe('landing site naming', () => {
+  it('defaults new sites to sentence-case Site n and follows a rename', () => {
+    for (const site of [...store().mission.customSites]) store().deleteSite(site.id);
+    const lat = 26.55;
+    const lon = 72.95;
+    const nextLat = 26.57;
+    mergeTerrain({
+      [terrainKey(lat, lon)]: 210,
+      [terrainKey(nextLat, lon)]: 215,
+    });
+
+    store().startSitePlacement();
+    store().addSiteAt(lat, lon);
+    const first = store().mission.customSites[0];
+    expect(first.name).toBe('Site 1');
+    expect(store().selectedSiteId).toBe(first.id);
+
+    store().updateSite(first.id, { name: 'Leh Valley Strip' });
+    expect(store().mission.customSites[0].name).toBe('Leh Valley Strip');
+
+    store().addSiteAt(nextLat, lon);
+    expect(store().mission.customSites[1].name).toBe('Site 2');
+  });
+});
+
 describe('missions', () => {
   it('resets edits to the template but keeps the mission identity', () => {
     const templateNames = store().mission.nodes.map((n) => n.name);
