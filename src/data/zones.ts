@@ -1,8 +1,9 @@
-// Illustrative exercise geography only. No polygon here is operational, and
+// Illustrative exercise geography only. No polygon here is operational and
 // none follows a real international boundary: each one is a small area inside
-// a route preset's working region, at least 50 km from any land border, chosen
-// so the rehearsal can show a denied area without depicting a real one.
-// This file is intentionally the only source of denied-area geometry.
+// a route preset's working region, well inside the interior and not
+// survey-verified, chosen so the rehearsal can show a denied area without
+// depicting a real one. This file is intentionally the only source of
+// denied-area geometry.
 
 export const DENIED_LABEL = 'DENIED AREA (EXERCISE - ILLUSTRATIVE)';
 
@@ -26,11 +27,11 @@ export const DENIED_ZONES: DeniedZone[] = [
     id: 'ladakh-denied',
     presetId: 'ladakh',
     polygon: [
-      [77.19, 34.06],
-      [77.35, 34.06],
-      [77.36, 34.14],
-      [77.2, 34.145],
-      [77.19, 34.06],
+      [77.03, 34.06],
+      [77.22, 34.06],
+      [77.23, 34.15],
+      [77.04, 34.15],
+      [77.03, 34.06],
     ],
   },
   {

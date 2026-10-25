@@ -683,23 +683,30 @@ untouched, so the run continues from the same epoch, clock, pause and speed.
 
 ### Scenario scripts
 Scripts are the only fault source in a rehearsal; a run starts from the
-default healthy engine, and each card injects at **20 % of the planned
-mission** (`scripts.ts:23`, `:37`). On the 7 h 04 min Ladakh mission that is
-4 800 mission seconds (24 of the 120 sim seconds).
-- **NORMAL FLIGHT** — no fault (`scripts.ts:9-16`).
-- **COOLING FAILURE** — engine `cooling`, cylinder **3**, severity **0.8**,
-  ramp **30 s** (`scripts.ts:18-31`). In the live run this reaches WARNING with
-  the cylinder delta first, then a measured CHT limit; the test run at 60x read
-  WARNING at 2:50 with +11 °C, WARNING at 3:11 with +25 °C, and CRITICAL at
-  3:53 on the 7 h 04 min mission.
-- **SENSOR GLITCH** — sensor `drift`, CHT 1, severity **0.5**, ramp **10 s**,
-  flagged as `sensorOnly` (`scripts.ts:32-45`). Its measured offset peaks around
-  21-24 °C, below the 135 °C CHT limit, so the rehearsal stays at ADVISORY to
-  the end; this is the false alarm the script is named for. Measured values,
-  not true values, gate the hard limits, so a larger drift would still abort
-  (`presentation.ts:104-117`). The ADVISORY sentence names the channel and the
-  measured-minus-true offset: “Engine healthy, instrument fault: CHT Cyl 1 reads
-  N C above the twin.” (`presentation.ts:108-117`).
+default healthy engine. Each card injects when the mission clock reaches
+`triggerFrac x plannedS` (`FlyStage.tsx:315-316`), so the trigger is not tied to
+the compressed simulation clock.
+- **NORMAL FLIGHT** - no fault (`scripts.ts:16-23`).
+- **COOLING OVER DENIED AREA** - engine `cooling`, cylinder **3**, severity
+  **0.6**, ramp **30 s**, trigger **0** (`scripts.ts:24-38`). The twin flags
+  about 32 sim s after injection (mission ~1 h 50 min) while the aircraft holds
+  over SHAM inside the denied area. The measured CHT stays below the 135 °C
+  limit through the rehearsal.
+- **FAILURE + LINK JAMMED** - the same fault with `jam: true` from the start
+  (`scripts.ts:39-55`). The guard erases at detection; no item is ever sent.
+- **FAILURE OVER FRIENDLY AREA** - the same fault injected at **57 %** of the
+  route (`scripts.ts:56-70`), in the ALCHI hold. Detection happens about
+  1 h 50 min later over PHEY, after the aircraft has left the denied area, and
+  a friendly alternate is reachable; the guard stays in STANDBY and does not
+  erase.
+- **SENSOR GLITCH** - sensor `drift`, CHT 1, severity **0.5**, ramp **10 s**,
+  trigger **0.2**, flagged as `sensorOnly` (`scripts.ts:71-83`). Its measured
+  offset peaks around 21-24 °C, below the 135 °C CHT limit, so the rehearsal
+  stays at ADVISORY to the end; this is the false alarm the script is named for.
+  Measured values, not true values, gate the hard limits, so a larger drift
+  would still abort (`presentation.ts:104-117`). The ADVISORY sentence names the
+  channel and the measured-minus-true offset: “Engine healthy, instrument
+  fault: CHT Cyl 1 reads N C above the twin.” (`presentation.ts:108-117`).
 
 ### Engine life
 The life model is unchanged from M2 and now integrates the rehearsal:
@@ -721,18 +728,25 @@ waiting for the full Monte Carlo.
 ### HUD rules applied
 - Panel surface is `bg-1` at **88 %**, 1 px `line-0` border, square corners,
   no shadow or gradient (`index.css:64-68`).
-- The FLY stage has five overlay groups: engine state + sentence (28 px /
+- The FLY stage has six overlay groups: engine state + sentence (28 px /
   16 px), clock/pause/speed (12-13 px), engine strip (12-13 px), nearest
-  landing (12-13 px), ticker (12-13 px). No chart, table, z-score or sigma is
-  mounted on the stage; the only canvas is the map
-  (`FlyStage.tsx:345-458`).
+  landing top-right (12-13 px), the DATA panel with the collapsible ground
+  station bottom-right, and the ticker bottom-centre (12-13 px). No chart,
+  table, z-score or sigma is mounted on the stage; the only canvas is the map
+  (`FlyStage.tsx:457-582`, `DataGuardHud.tsx:46-333`).
 - Ticker keeps the last three events younger than **8 s** wall time, fading
-  between 6.5 s and 8 s (`FlyStage.tsx:26`, `:89-114`).
+  between 6.5 s and 8 s (`FlyStage.tsx:27`, `:93-117`).
 - Data teal `#5E9C9A` is used for measured numeric elements only; the thermal
   ramp remains the anchored nominal/caution/limit scale
-  (`FlyStage.tsx:396-421`). The nearest-landing readout updates on the existing
+  (`FlyStage.tsx:493-517`). The nearest-landing readout updates on the existing
   1 s alternate cadence (`useAlternates.ts:99-103`), so it can read ASSESSING
   for the first second and then steps between the plan's holds.
+- The DATA panel refreshes on every session tick and on a 1 s wall timer, so
+  the adversary verdict appears after its 3 s hold even if the simulation is
+  paused (`FlyStage.tsx:202-210`). Jamming is available from the panel or the
+  **J** key and resets with every rehearsal epoch (`FlyStage.tsx:184-200`,
+  `:221-223`). Remote zeroize is enabled only in ARMED and requires the inline
+  CONFIRM (`DataGuardHud.tsx:286-326`).
 
 ### Stage map
 The stages use a new MapLibre view (`RehearsalMap.tsx`), while the E overlay
@@ -763,18 +777,165 @@ is invented to fill that gap.
   50 km from any land border; they are not real restricted areas. Ground
   stations are similarly illustrative (`zones.ts:60-64`).
 - Camera: `fitRouteCamera` is explicit Web Mercator math rather than
-  `fitBounds`, with a zoom-10 ceiling and caller padding (FLY uses 96/120 px)
-  so the route is framed inside the HUD (`:404-431`, `FlyStage.tsx:340`).
+  `fitBounds`, with a zoom-10 ceiling and caller padding (FLY now uses
+  96/380 px so the DATA panel does not cover the route) so the route is framed
+  inside the HUD (`:404-431`, `FlyStage.tsx:436`).
   Preset changes use `flyTo` (900 ms); first paint uses `jumpTo`
   (`RehearsalMap.tsx:618-629`).
 - Basemap failure: if overlays never become ready within 6 s, the style falls
   back to a flat dark background and the same route/denied layers are added;
   no glyph stack is required because chevrons are icons (`:33`, `:573-597`).
 
-### Verification baseline
-`npx tsc --noEmit`, `npm run build`, and `npx vitest run` (114 tests) pass.
-Runtime checks at 1440×900 covered: BRIEF preset fly-to and MC GO with three
-factor sentences; cooling WARNING/CRITICAL with cylinder + delta and the
+## Data Guard — recon payload, crypto, link and guard (October 2026)
+
+### Recon points and dummy payload
+- Five points of interest per preset, placed beside a hold or waypoint from a
+  fixed per-preset anchor table (`pois.ts:26-81`). The per-preset seed varies
+  each nominal size by ±10 % and offsets the site by up to 0.003° (about
+  ±330 m); priorities and types are fixed per anchor, so every rehearsal of a
+  preset captures the same manifest (`pois.ts:93-113`).
+- **Sizes:** IMAGE **15-60 MB**, VIDEO **150-600 MB** (`pois.ts:83-87`). These
+  are assumed reconnaissance-product sizes, not sensor-format arithmetic.
+- **Capture:** the first route sample within **3 000 m** of the site captures
+  the item (`pois.ts:16`, `:116-126`). The route is sampled every **5 mission
+  seconds**, so the capture timestamp is a mission-clock value, not sim time.
+- The encrypted object is a deterministic dummy: a readable four-line header
+  plus seeded random bytes at **1:100000** of the nominal size, floor **192 B**
+  (`dummy.ts:8-12`, `:36-56`). Every transfer, counter and capacity figure uses
+  the nominal MB, never the dummy byte count. The ground-station DECRYPT button
+  therefore shows the demo header, not imagery.
+- Ground stations and denied areas come from the illustrative exercise
+  geography in `data/zones.ts`; they are not operational.
+
+### Cryptography
+- At session start each end generates an **ephemeral ECDH P-256** key pair.
+  Both derive the same key with **HKDF-SHA256** (salt
+  `aerotwin/datalink/session/v1`, info `recon payload aes-256-gcm`) into a
+  non-extractable **AES-256-GCM** key (`crypto.ts:9-12`, `:74-115`).
+- Each item is encrypted once with a fresh **12-byte nonce**
+  (`crypto.ts:117-128`); the record keeps ciphertext, nonce and the **SHA-256
+  of the plaintext** (`crypto.ts:179-195`). The aircraft key and records live
+  in one `SecureElement`; the ground holds only its derived key
+  (`session.ts:164-178`).
+- Delivery copies the record before dispatch (`snapshotRecord`,
+  `crypto.ts:266-273`), so a later erase cannot corrupt data already at the
+  ground. The ground decrypts and compares the hash before the item becomes
+  AT_GROUND (`session.ts:362-382`).
+- `zeroize` overwrites the exposed raw key bytes with CSPRNG output and zero,
+  drops the `CryptoKey`, overwrites every stored nonce and ciphertext block
+  with CSPRNG output, and locks the element with a wall-clock timestamp
+  (`crypto.ts:197-213`). Items not already AT_GROUND are marked ERASED
+  (`session.ts:384-402`). It is idempotent and returns the number of records
+  destroyed.
+- `adversaryRecoveryAttempt` runs only on a locked element: it tries every
+  overwritten block with a fresh random AES-256 key and requires every
+  authentication-tag check to fail (`crypto.ts:215-247`). The UI holds the
+  verdict for **3 000 ms** wall time after erase before showing it, unless
+  REVEAL is pressed (`session.ts:393`, `:446-450`).
+- **Honest limit:** browser WebCrypto has no key-destruction API. JavaScript
+  cannot guarantee that no key copy remains in the heap, and the adversary is a
+  decoy key rather than a hardware attacker. This is a protocol demonstration;
+  production needs a hardware secure element and certified link encryption.
+  The DATA panel footer and README state the same.
+
+### Simulated datalink
+- Ground station per preset (`zones.ts:61-65`). Effective range is
+  **min(250 km, 4.12 x (sqrt(h_uav_m) + sqrt(10 m)))** km
+  (`link.ts:9-17`, `:35`). With the UAV at 5 200 m the horizon is ~301 km, so
+  the 250 km assumption binds.
+- Rate is **2.0 Mbps** inside 20 % of range, falls linearly to **0.2 Mbps** at
+  the range edge, and is zero beyond it (`link.ts:8-13`, `:44-49`). Jamming
+  wins over geometry and forces zero (`link.ts:38-40`). States are UP,
+  DEGRADED, LOST and JAMMED.
+- Terrain masking, multipath, antenna gain, rain fade and jamming strategy are
+  **not modelled**. The link is an illustrative line-of-sight budget.
+- Offload spends at most **rate / 8 MB per mission second** each tick, in
+  priority order (P1 first), then oldest capture, then id
+  (`offload.ts:20-22`, `:34-38`, `:95-112`). An item is complete when its last
+  byte is sent; only a successful ground hash check makes it AT_GROUND. If the
+  link drops, unsent bytes stay pending and the guard makes the erase decision.
+
+### Guard decision table
+Evaluated every session tick after capture, link update and offload
+(`session.ts:192-291`):
+- **MONITOR** - no engine fault, or `sensorOnly`. A sensor fault never latches
+  an engine fault and never escalates (`guard.ts:165-179`). The named engine
+  fault is latched on the first non-nominal engine diagnosis so a flickering
+  classifier cannot drop the guard back to MONITOR.
+- **OFFLOAD_PRIORITY** - engine fault, no friendly landing, predicted loss
+  outside the denied area; sending continues at the available rate.
+- **STANDBY** - engine fault and a friendly alternate is reachable; data stays
+  encrypted onboard and the offload continues, with no erase.
+- **ARMED** - engine fault, no friendly landing, predicted loss inside the
+  denied area. The reason gives pending/collected MB, transfer time and the
+  whole priority items that fit in the time to loss (`offloadFit`,
+  `offload.ts:63-89`).
+- **ZEROIZED** - terminal. Trigger precedence: operator remote zeroize, forced
+  landing inside the area, JAMMED, LOST, time to loss below **20 s**, then
+  offload finished (`guard.ts:136-163`). The 20 s figure is an assumed erase
+  cushion (`guard.ts:11-12`).
+
+Supporting rules:
+- **Predicted loss** is the route position after
+  `min(RUL P10, glide time)` mission seconds. RUL P10 is reported by the
+  diagnosis in compressed sim seconds and is converted with
+  `plannedS / 120` (`guard.ts:14-20`, `:27-32`). Glide time is
+  `altitude x 12 / TAS` (`guard.ts:22-25`). Both the current position and the
+  predicted loss point are tested against the denied polygon
+  (`guard.ts:34-49`).
+- **Friendly landing** requires verdict REACHABLE and a non-negative alternate
+  RUL margin. When the RUL margin is not available yet, a range-only reachable
+  field is accepted **only if the predicted loss is outside the denied area**
+  (`guard.ts:51-69`). This is what makes the jammed card arm (predicted inside,
+  RUL null) while the friendly-area card may stand by (predicted outside,
+  RUL null). The alternate layer's existing `rulMarginS` is the reachability
+  module's own mixed-clock margin (`nav/alternates.ts:103-104`); Data Guard uses
+  its sign, not its magnitude.
+- Reasons are built from the computed values; there are no canned scenario
+  sentences in the guard (`guard.ts:82-102`, `:165-224`).
+- Time compression affects only the display and the estimator horizon. Capture
+  times, fault triggers, RUL conversion and offload budgets all use mission
+  seconds, so the Data Guard arithmetic matches the debrief clock.
+
+### Scenario calibration
+- All three cooling cards use cylinder **3**, severity **0.6**, ramp **30 s**.
+  The twin starts flagging about **32 sim s** (~1 h 50 min mission) after
+  injection, and the measured CHT stays below the 135 °C limit through 120 sim
+  seconds.
+- **COOLING OVER DENIED AREA (a):** injection at mission 0; detection over
+  SHAM inside the zone. The link is up, so items captured at SHAM have already
+  been sent; the guard arms, the offload completes and the erase fires on
+  "Offload finished". Probe: 666 MB collected/secured, 0 lost, recovery 3/3
+  blocks failed on the Ladakh preset.
+- **FAILURE + LINK JAMMED (b):** jammed from the start, so no item is ever
+  sent. At detection the predicted loss is inside and the RUL is still null;
+  the null-margin fallback rejects the range-only alternates, and JAMMED fires
+  the erase immediately. Every captured item is lost; the recovery attempt
+  fails on every block.
+- **FAILURE OVER FRIENDLY AREA (c):** trigger at **57 %** of the route
+  (in the ALCHI hold). The compressed ramp is detected ~1 h 50 min later over
+  PHEY, after the aircraft has left the zone. The predicted loss stays outside
+  the denied area, so a range-REACHABLE alternate with a null margin is
+  accepted and the guard holds STANDBY to landing; the data offloads and the
+  key is retained (probe: 992 MB secured, 0 lost, no erase).
+- **SENSOR GLITCH (d):** `sensorOnly` is set by the card, so the guard stays in
+  MONITOR for the whole run even though the classifier warns; no erase.
+
+### Verification
+`npx tsc --noEmit`, `npm run build`, and `npx vitest run` (176 tests) pass.
+The Data Guard tests cover: ECDH/HKDF agreement, AES-GCM round trip and tamper
+rejection, hash verification at the ground, zeroize making the stored
+ciphertext undecryptable, word-for-word adversary failure after zeroize, link
+horizon/rate/jam states, offload budget and priority order, the four guard
+cards plus edge cases, seeded manifests and 3 km capture scheduling, and the
+session's secured/onboard/lost conservation. Runtime checks at 1440×900
+covered all four Data Guard cards, the ground-station progress + DECRYPT
+preview, the 3 s adversary verdict, JAM by button and key, STOP/PAUSE and
+REPLAY reset. See README for the browser-crypto limitation.
+
+Earlier rehearsal checks remain valid: BRIEF preset fly-to and MC GO with
+three factor sentences; cooling WARNING/CRITICAL with cylinder + delta and the
 computed lead line; sensor ADVISORY for a full run; nearest-landing changes
 between holds; ticker fade after 8 s; E/Esc overlay round trip while paused;
 REPLAY and NEW MISSION.
+

@@ -1,8 +1,14 @@
 import type { ChannelId, EngineFaultKind, SensorFaultKind } from '../sim/types';
+import type { DataGuardDebrief } from '../payload/types';
 
 export type Stage = 'brief' | 'fly' | 'debrief';
 
-export type ScenarioId = 'normal' | 'cooling' | 'sensor';
+export type ScenarioId =
+  | 'normal'
+  | 'cooling-denied'
+  | 'cooling-jammed'
+  | 'cooling-friendly'
+  | 'sensor';
 
 export type Outcome = 'complete' | 'aborted' | 'lost';
 
@@ -24,6 +30,8 @@ export interface ScenarioScript {
   /** Fraction of the planned mission at which the fault is injected; null = none. */
   triggerFrac: number | null;
   fault: ScenarioFault | null;
+  /** The datalink is jammed from the start of the rehearsal. */
+  jam?: boolean;
 }
 
 export type EventTone = 'info' | 'caution' | 'alert';
@@ -57,4 +65,5 @@ export interface DebriefResult {
   leadLine: string;
   sensorOnly: boolean;
   ticks: TimelineTick[];
+  dataGuard?: DataGuardDebrief;
 }

@@ -5,8 +5,9 @@ import type { Factor } from '../mission/monteCarlo';
 import type { WaypointWeather } from '../mission/weather';
 import { weatherPresetById } from '../mission/weather';
 import { CHT_NOMINAL_C } from '../sim/limits';
-import { REHEARSAL_SIM_SPAN_S, fmtMmSs } from './clock';
+import { REHEARSAL_SIM_SPAN_S, fmtClock, fmtMmSs } from './clock';
 import type { DebriefResult, Outcome, RehearsalEvent, TimelineTick } from './types';
+import type { DataGuardDebrief } from '../payload/types';
 
 /**
  * Life model: one hour at or below the nominal CHT band consumes one hour of
@@ -140,6 +141,7 @@ export interface BuildDebriefInput {
   limitS: number | null;
   limitLabel: string | null;
   sensorOnly: boolean;
+  dataGuard?: DataGuardDebrief;
 }
 
 function computedLine(input: BuildDebriefInput): string {
@@ -154,6 +156,11 @@ function computedLine(input: BuildDebriefInput): string {
   }
   if (limitS !== null) {
     return `The ${limitLabel ?? 'engine'} limit was reached before the twin could flag a fault.`;
+  }
+  if (flagS !== null) {
+    return outcome === 'complete'
+      ? `Twin flagged the fault at T+${fmtClock(flagS)}; no engine limit was reached before landing.`
+      : `Twin flagged the fault at T+${fmtClock(flagS)}; no engine limit was recorded.`;
   }
   if (outcome === 'complete') {
     return 'Twin flagged no fault before landing.';
@@ -177,5 +184,6 @@ export function buildDebrief(input: BuildDebriefInput): DebriefResult {
     leadLine: computedLine(input),
     sensorOnly: input.sensorOnly,
     ticks,
+    ...(input.dataGuard ? { dataGuard: input.dataGuard } : {}),
   };
 }

@@ -2,9 +2,15 @@ import type { ScenarioId, ScenarioScript } from './types';
 
 /**
  * Scenario scripts. Fault severities and ramps are calibration values: the
- * cooling fault must reach a CHT limit after a detectable warning, and the
- * sensor drift must stay below the hard limit so the twin's disagreement is a
- * false alarm (see ASSUMPTIONS.md).
+ * cooling fault must reach a detectable twin disagreement without running into
+ * a measured hard limit, and the sensor drift must stay below the hard limit so
+ * the twin's disagreement is a false alarm (see ASSUMPTIONS.md).
+ *
+ * Data Guard cards use severity 0.6 on cylinder 3: the twin flags around 32 s
+ * (mission ~1 h 50 min, over SHAM), while the measured CHT stays below 135 C
+ * through the 120 s rehearsal. The friendly-area card injects the same fault at
+ * 57 % of the route (in the Alchi hold); the compressed 30 s ramp is detected
+ * ~1 h 50 min later, over PHEY, after the aircraft has left the denied area.
  */
 export const SCENARIO_SCRIPTS: ScenarioScript[] = [
   {
@@ -16,15 +22,47 @@ export const SCENARIO_SCRIPTS: ScenarioScript[] = [
     fault: null,
   },
   {
-    id: 'cooling',
-    title: 'COOLING FAILURE',
-    blurb: 'Cylinder 3 cooling degrades in cruise.',
+    id: 'cooling-denied',
+    title: 'COOLING OVER DENIED AREA',
+    blurb:
+      'Cylinder 3 cooling fails at the start of the mission and the link is up. The guard offloads priority data, then erases the key over the denied area.',
     sensorOnly: false,
-    triggerFrac: 0.2,
+    triggerFrac: 0,
     fault: {
       scope: 'engine',
       kind: 'cooling',
-      severity: 0.8,
+      severity: 0.6,
+      rampTime: 30,
+      cylinder: 3,
+    },
+  },
+  {
+    id: 'cooling-jammed',
+    title: 'FAILURE + LINK JAMMED',
+    blurb:
+      'The same cooling failure with the datalink jammed from the start. The guard erases immediately and the unsent items are lost.',
+    sensorOnly: false,
+    triggerFrac: 0,
+    fault: {
+      scope: 'engine',
+      kind: 'cooling',
+      severity: 0.6,
+      rampTime: 30,
+      cylinder: 3,
+    },
+    jam: true,
+  },
+  {
+    id: 'cooling-friendly',
+    title: 'FAILURE OVER FRIENDLY AREA',
+    blurb:
+      'The same cooling failure late in the route, detected over Phey near Leh. A friendly alternate is reachable: data stays encrypted onboard and the offload continues.',
+    sensorOnly: false,
+    triggerFrac: 0.57,
+    fault: {
+      scope: 'engine',
+      kind: 'cooling',
+      severity: 0.6,
       rampTime: 30,
       cylinder: 3,
     },
@@ -32,7 +70,7 @@ export const SCENARIO_SCRIPTS: ScenarioScript[] = [
   {
     id: 'sensor',
     title: 'SENSOR GLITCH',
-    blurb: 'False alarm: CHT 1 drifts high, engine healthy.',
+    blurb: 'False alarm: CHT 1 drifts high, engine healthy. Data Guard never escalates.',
     sensorOnly: true,
     triggerFrac: 0.2,
     fault: {

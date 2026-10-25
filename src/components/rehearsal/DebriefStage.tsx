@@ -2,8 +2,9 @@ import { Fragment, useLayoutEffect, useRef, useState } from 'react';
 import StageHeader from './StageHeader';
 import { useRehearsalStore } from '../../rehearsal/store';
 import { outcomeHeadline } from '../../rehearsal/metrics';
-import { fmtClock, fmtMmSs } from '../../rehearsal/clock';
+import { fmtClock } from '../../rehearsal/clock';
 import { scriptById } from '../../rehearsal/scripts';
+import type { DataGuardDebrief } from '../../payload/types';
 import type { Outcome } from '../../rehearsal/types';
 
 const OUTCOME_COLOR: Record<Outcome, string> = {
@@ -11,6 +12,95 @@ const OUTCOME_COLOR: Record<Outcome, string> = {
   aborted: 'text-amber',
   lost: 'text-red',
 };
+
+function mb(value: number): string {
+  return `${Math.round(value)} MB`;
+}
+
+function DataGuardSection({ data }: { data: DataGuardDebrief }) {
+  const recovered = data.recovery;
+  return (
+    <section className="mt-10">
+      <div className="flex items-baseline justify-between gap-4">
+        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
+          Data Guard
+        </span>
+        <span className="num font-mono text-[12px] text-dim">
+          {mb(data.collectedMB)} collected
+        </span>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-6">
+        <Meta label="SECURED AT GROUND" value={mb(data.securedMB)} note="SHA-256 verified on receipt" />
+        <Meta
+          label={data.onboardMB > 0 ? 'ONBOARD' : 'ERASED IF UNSENT'}
+          value={mb(data.onboardMB)}
+          note={data.onboardMB > 0 ? 'encrypted, key retained' : undefined}
+        />
+        <Meta
+          label="ERASE"
+          value={data.eraseMissionS === null ? 'NOT ERASED' : fmtClock(data.eraseMissionS)}
+          note={data.eraseMissionS === null ? 'mission key retained' : 'mission clock'}
+        />
+      </div>
+
+      <div className="mt-5 border-t border-edge pt-3">
+        <div className="grid grid-cols-[70px_repeat(4,1fr)] font-mono text-[10px] uppercase tracking-[0.08em] text-dim">
+          <span>Priority</span>
+          <span className="text-right">Collected</span>
+          <span className="text-right">Secured</span>
+          <span className="text-right">Onboard</span>
+          <span className="text-right">Lost</span>
+        </div>
+        {data.byPriority.map((p) => (
+          <div
+            key={p.priority}
+            className="grid grid-cols-[70px_repeat(4,1fr)] border-t border-edge/60 font-mono text-[12px] leading-6"
+          >
+            <span className="text-dim">P{p.priority}</span>
+            <span className="num text-right text-txt">{mb(p.collectedMB)}</span>
+            <span className="num text-right text-steel">{mb(p.securedMB)}</span>
+            <span className="num text-right text-txt">{mb(p.onboardMB)}</span>
+            <span className={`num text-right ${p.lostMB > 0 ? 'text-red' : 'text-dim'}`}>
+              {mb(p.lostMB)}
+            </span>
+          </div>
+        ))}
+        <div className="grid grid-cols-[70px_repeat(4,1fr)] border-t border-edge font-mono text-[12px] leading-6">
+          <span className="text-dim">TOTAL</span>
+          <span className="num text-right text-txt">{mb(data.collectedMB)}</span>
+          <span className="num text-right text-steel">{mb(data.securedMB)}</span>
+          <span className="num text-right text-txt">{mb(data.onboardMB)}</span>
+          <span className={`num text-right ${data.lostMB > 0 ? 'text-red' : 'text-dim'}`}>
+            {mb(data.lostMB)}
+          </span>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-col gap-1 border-t border-edge pt-3 font-mono text-[11px] leading-[18px]">
+        {data.eraseMissionS !== null ? (
+          <>
+            <span className="uppercase tracking-[0.06em] text-red">
+              Adversary recovery: {recovered ? 'failed - key destroyed' : 'pending'}
+            </span>
+            <span className="text-dim">
+              {recovered
+                ? `${recovered.failed} of ${recovered.attempted} stored blocks failed authentication after the erase.`
+                : 'The recovery attempt has not completed.'}
+            </span>
+            <span className="text-dim">Reason: {data.eraseReason}</span>
+          </>
+        ) : (
+          <span className="uppercase tracking-[0.06em] text-steel">
+            {data.onboardMB > 0
+              ? 'No erase - key retained; onboard data is recoverable at a friendly landing.'
+              : 'No erase - all collected data reached the ground station.'}
+          </span>
+        )}
+      </div>
+    </section>
+  );
+}
 
 function Meta({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
@@ -72,7 +162,7 @@ export default function DebriefStage() {
   const placed: { x0: number; x1: number }[][] = [[], [], []];
   const ticks = debrief.ticks.map((tick) => {
     const pct = Math.max(0, Math.min(100, (tick.missionS / totalS) * 100));
-    const label = `${tick.label} ${fmtMmSs(tick.missionS)}`;
+    const label = `${tick.label} ${fmtClock(tick.missionS)}`;
     const w = Math.max(48, label.length * 6.1 + 8);
     const center = (pct / 100) * trackW;
     const preferred = pct > 86 ? center - w : pct < 14 ? center : center - w / 2;
@@ -150,7 +240,7 @@ export default function DebriefStage() {
                       style={{ left: `${x0}px`, top: `${row * TICK_ROW_H}px` }}
                     >
                       {tick.label}{' '}
-                      <span className="num text-txt">{fmtMmSs(tick.missionS)}</span>
+                      <span className="num text-txt">{fmtClock(tick.missionS)}</span>
                     </div>
                   </Fragment>
                 );
@@ -163,6 +253,8 @@ export default function DebriefStage() {
               </span>
             </div>
           </section>
+
+          {debrief.dataGuard ? <DataGuardSection data={debrief.dataGuard} /> : null}
 
           <div className="mt-8 flex items-center gap-3 border-t border-edge pt-6">
             <button

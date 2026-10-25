@@ -1,19 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import RehearsalMap from './RehearsalMap';
+import DataGuardHud from './DataGuardHud';
 import { SyntheticChip } from './StageHeader';
 import { useSimStore, type SimStore } from '../../state/store';
 import { currentPlan, missionClockPosition, useMissionStore } from '../../mission/missionStore';
 import { activeAirfields, useAlternates } from '../../nav/useAlternates';
+import type { AlternateRow } from '../../nav/alternates';
 import { useRehearsalStore } from '../../rehearsal/store';
 import {
   REHEARSAL_SIM_SPAN_S,
   fmtClock,
-  fmtMmSs,
   missionClockS,
 } from '../../rehearsal/clock';
 import { hudStatus, measuredLimit, type HudState } from '../../rehearsal/presentation';
 import { buildDebrief, lifeDoseIncrement } from '../../rehearsal/metrics';
 import { scriptById } from '../../rehearsal/scripts';
+import { PayloadSession } from '../../payload/session';
+import type { PayloadView } from '../../payload/types';
+import { groundForPreset, zoneForPreset } from '../../data/zones';
 import { thermalColor } from '../../sim/uiMeta';
 import {
   CHT_CAUTION_C,
@@ -101,7 +105,7 @@ function Ticker() {
             style={{ opacity, transition: 'opacity 400ms linear' }}
           >
             <span className="num shrink-0 font-mono text-[12px] text-dim">
-              T+{fmtMmSs(e.missionS)}
+              T+{fmtClock(e.missionS)}
             </span>
             <span
               className={`text-[13px] leading-4 ${
@@ -165,16 +169,86 @@ export default function FlyStage() {
 
   const [armed, setArmed] = useState(false);
   const [injected, setInjected] = useState(false);
+  const [payloadView, setPayloadView] = useState<PayloadView | null>(null);
+  const [payloadError, setPayloadError] = useState<string | null>(null);
+  const [jammed, setJammed] = useState(false);
 
   const ctxRef = useRef({ plan, script, waypoints, weather });
   ctxRef.current = { plan, script, waypoints, weather };
   const runRef = useRef<RunState | null>(null);
+  const sessionRef = useRef<PayloadSession | null>(null);
+  const jammedRef = useRef(false);
+  const navRowsRef = useRef<AlternateRow[]>([]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== 'j' || event.repeat) return;
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      ) {
+        return;
+      }
+      jammedRef.current = !jammedRef.current;
+      setJammed(jammedRef.current);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Ground truth can finish after a pause or while the player is idle; a slow
+  // refresh keeps the adversary verdict and link readout current.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const session = sessionRef.current;
+      if (session) setPayloadView(session.getView());
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (!runRef.current || runRef.current.epoch !== epochTarget) {
       runRef.current = newRun(epochTarget);
     }
     const run = runRef.current;
+
+    let cancelled = false;
+    setPayloadView(null);
+    setPayloadError(null);
+    const scriptJam = Boolean(ctxRef.current.script.jam);
+    jammedRef.current = scriptJam;
+    setJammed(scriptJam);
+
+    void PayloadSession.create({
+      presetId,
+      waypoints: ctxRef.current.waypoints,
+      plan: ctxRef.current.plan,
+      deniedZone: zoneForPreset(presetId),
+      groundStation: groundForPreset(presetId),
+      emit: (event) => {
+        useRehearsalStore.getState().pushEvent({
+          missionS: event.missionS,
+          label: event.label,
+          text: event.text,
+          tone: event.tone,
+          tick: event.tick,
+        });
+      },
+    })
+      .then((session) => {
+        if (cancelled) {
+          session.dispose();
+          return;
+        }
+        sessionRef.current?.dispose();
+        sessionRef.current = session;
+        setPayloadView(session.getView());
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setPayloadError(`KEY EXCHANGE FAILED: ${String(err)}`);
+      });
 
     const finish = (outcome: Outcome, missionS: number) => {
       if (run.done) return;
@@ -188,6 +262,7 @@ export default function FlyStage() {
         outcome === 'complete'
           ? ctx.plan.cruiseDistM
           : (missionClockPosition(ctx.waypoints, ctx.weather, missionS)?.distM ?? 0);
+      const dataGuard = sessionRef.current?.getDebrief();
       const debrief = buildDebrief({
         outcome,
         plannedS: ctx.plan.totalS,
@@ -200,6 +275,7 @@ export default function FlyStage() {
         limitS: run.limitS,
         limitLabel: run.limitLabel,
         sensorOnly: ctx.script.sensorOnly,
+        ...(dataGuard ? { dataGuard } : {}),
       });
       useRehearsalStore.getState().finish(debrief);
     };
@@ -246,7 +322,7 @@ export default function FlyStage() {
           missionS: mission,
           label: 'FAULT INJECTED',
           text:
-            sc.id === 'cooling'
+            sc.id.startsWith('cooling')
               ? `Cylinder ${f.cylinder ?? 3} cooling degraded.`
               : sc.id === 'sensor'
                 ? 'CHT 1 sensor drifting high; engine healthy.'
@@ -254,6 +330,20 @@ export default function FlyStage() {
           tone: 'caution',
           tick: true,
         });
+      }
+
+      const session = sessionRef.current;
+      if (session) {
+        session.tick({
+          missionS: mission,
+          diagnosis: state.diagnosis,
+          sensorOnly: sc.sensorOnly,
+          snapshot: sn,
+          alternates: navRowsRef.current,
+          jammed: jammedRef.current,
+          forcedLanding: false,
+        });
+        setPayloadView(session.getView());
       }
 
       const limit = measuredLimit(sn);
@@ -300,13 +390,16 @@ export default function FlyStage() {
     const unsub = useSimStore.subscribe(drive);
     drive(useSimStore.getState());
     return () => {
+      cancelled = true;
       unsub();
       if (run.hold !== null) {
         window.clearTimeout(run.hold);
         run.hold = null;
       }
+      sessionRef.current?.dispose();
+      sessionRef.current = null;
     };
-  }, [epochTarget]);
+  }, [epochTarget, presetId]);
 
   const ready = armed && simEpoch >= epochTarget;
   const shownSnap = ready ? snap : null;
@@ -320,6 +413,7 @@ export default function FlyStage() {
   }, [ready, missionS, waypoints, weather]);
   const nav = useAlternates(pos, fields);
   const nearest = nav.nearest;
+  navRowsRef.current = nav.rows;
 
   const hud = hudStatus(shownSnap, diagnosis, script, injected);
   const r = shownSnap?.readings;
@@ -338,7 +432,7 @@ export default function FlyStage() {
           clockS={ready ? missionS : null}
           showMarker
           height="100%"
-          fitPadding={{ top: 96, right: 120, bottom: 96, left: 120 }}
+          fitPadding={{ top: 96, right: 380, bottom: 96, left: 120 }}
         />
       </div>
 
@@ -420,7 +514,7 @@ export default function FlyStage() {
           </div>
         </div>
 
-        <div className="absolute bottom-8 right-4">
+        <div className="absolute right-4 top-[78px]">
           <div className="hud-panel w-[248px] px-3 py-2">
             <div className="font-mono text-[12px] uppercase tracking-[0.06em] text-dim">
               NEAREST LANDING
@@ -448,6 +542,24 @@ export default function FlyStage() {
               <div className="mt-1 font-mono text-[12px] text-dim">ASSESSING</div>
             )}
           </div>
+        </div>
+
+        <div className="pointer-events-auto absolute bottom-8 right-4">
+          <DataGuardHud
+            view={payloadView}
+            groundName={groundForPreset(presetId)?.name ?? 'GROUND STATION'}
+            error={payloadError}
+            jammed={jammed}
+            onToggleJam={() => {
+              jammedRef.current = !jammedRef.current;
+              setJammed(jammedRef.current);
+            }}
+            onRemoteZeroize={() => sessionRef.current?.requestRemoteZeroize()}
+            onRevealAdversary={() => {
+              sessionRef.current?.revealAdversary();
+              if (sessionRef.current) setPayloadView(sessionRef.current.getView());
+            }}
+          />
         </div>
 
         <div className="absolute bottom-8 left-1/2 -translate-x-1/2">

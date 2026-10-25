@@ -98,9 +98,15 @@ describe('rehearsal clock', () => {
 });
 
 describe('scenario scripts', () => {
-  it('defines the three briefing cards', () => {
-    expect(SCENARIO_SCRIPTS.map((s) => s.id)).toEqual(['normal', 'cooling', 'sensor']);
-    expect(new Set(SCENARIO_SCRIPTS.map((s) => s.title)).size).toBe(3);
+  it('defines the five briefing cards', () => {
+    expect(SCENARIO_SCRIPTS.map((s) => s.id)).toEqual([
+      'normal',
+      'cooling-denied',
+      'cooling-jammed',
+      'cooling-friendly',
+      'sensor',
+    ]);
+    expect(new Set(SCENARIO_SCRIPTS.map((s) => s.title)).size).toBe(5);
   });
 
   it('keeps normal free of faults', () => {
@@ -110,13 +116,27 @@ describe('scenario scripts', () => {
     expect(triggerMissionS(s, 24000)).toBeNull();
   });
 
-  it('injects the cooling fault on cylinder 3 at 20 percent', () => {
-    const s = scriptById('cooling');
+  it('injects the cooling fault on cylinder 3 at the start', () => {
+    const s = scriptById('cooling-denied');
     expect(s.sensorOnly).toBe(false);
-    expect(s.triggerFrac).toBe(0.2);
+    expect(s.triggerFrac).toBe(0);
     expect(s.fault?.kind).toBe('cooling');
     expect(s.fault?.cylinder).toBe(3);
-    expect(triggerMissionS(s, 24000)).toBe(4800);
+    expect(triggerMissionS(s, 24000)).toBe(0);
+  });
+
+  it('starts the jammed card with a dead datalink', () => {
+    const s = scriptById('cooling-jammed');
+    expect(s.jam).toBe(true);
+    expect(s.fault?.kind).toBe('cooling');
+    expect(scriptById('cooling-denied').jam).toBeUndefined();
+  });
+
+  it('injects the friendly-area cooling failure late in the route', () => {
+    const s = scriptById('cooling-friendly');
+    expect(s.triggerFrac).toBe(0.57);
+    expect(triggerMissionS(s, 24000)).toBeCloseTo(13680, 6);
+    expect(s.jam).toBeUndefined();
   });
 
   it('marks the sensor script as a false alarm on CHT 1', () => {
@@ -161,7 +181,7 @@ describe('presentation of measured state', () => {
       state: 'WARNING',
       dominant: { label: 'Cooling degradation (cyl 3)', cylinder: 3 },
     } as unknown as Pick<Diagnosis, 'state' | 'dominant'>;
-    const h = hudStatus(snapshot([103, 103, 126, 103]), diag, scriptById('cooling'), true);
+    const h = hudStatus(snapshot([103, 103, 126, 103]), diag, scriptById('cooling-denied'), true);
     expect(h.state).toBe('WARNING');
     expect(h.sentence).toBe('Cooling degradation: cylinder 3 is 23 C above the other cylinders.');
   });
@@ -228,6 +248,25 @@ describe('debrief metrics', () => {
     expect(debrief.ticks[1].missionS).toBe(14413);
     expect(debrief.engineLifePct).toBeCloseTo(lifePct(3600 * 8), 10);
     expect(debrief.lifeEqH).toBeCloseTo(8, 10);
+  });
+
+  it('reports a twin flag when no hard limit was reached', () => {
+    const debrief = buildDebrief({
+      outcome: 'complete',
+      plannedS: 25447,
+      missionS: 25447,
+      flightS: 25447,
+      distanceM: 139300,
+      lifeDoseS: 0,
+      events: [event(6722, 'TWIN FLAG'), event(25447, 'MISSION END')],
+      flagS: 6722,
+      limitS: null,
+      limitLabel: null,
+      sensorOnly: false,
+    });
+    expect(debrief.leadLine).toBe(
+      'Twin flagged the fault at T+1:52:02; no engine limit was reached before landing.',
+    );
   });
 
   it('holds the advisory wording for a sensor-only run', () => {
