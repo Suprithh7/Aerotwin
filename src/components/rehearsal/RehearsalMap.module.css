@@ -252,6 +252,33 @@
   border: 2px solid var(--amber);
 }
 
+/* Aircraft: a 28 px top-view silhouette inside a 1 px state-coloured ring.
+   The ring colour is set inline from the HUD state. */
+.aircraft {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+  background-color: rgb(11 13 16 / 0.55);
+  z-index: 6;
+  pointer-events: none;
+  user-select: none;
+}
+
+.aircraftRotor {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  will-change: transform;
+}
+
+.aircraftRotor svg {
+  display: block;
+}
+
 .crosshair :global(.maplibregl-canvas) {
   cursor: crosshair;
 }

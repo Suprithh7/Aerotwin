@@ -17,6 +17,7 @@ import type { WeatherCell } from '../../mission/weather';
 import { circleRing, legMidpoint } from '../../mission/geometry';
 import { MAX_LINK_RANGE_KM } from '../../payload/link';
 import { AIRFIELDS } from '../../data/airfields';
+import { REHEARSAL_SIM_SPAN_S } from '../../rehearsal/clock';
 import { C } from '../../ui/theme';
 import styles from './RehearsalMap.module.css';
 
@@ -33,6 +34,20 @@ const FIT_MAX_ZOOM = 10;
 const WORLD_PX = 512;
 const DEG = Math.PI / 180;
 const CLICK_TO_VERTEX_MS = 220;
+/** Recent-track window in simulation seconds; the trail fades out at this age. */
+const TRAIL_SIM_S = 90;
+
+const UAV_SVG = `<svg viewBox="0 0 28 28" width="28" height="28" aria-hidden="true">
+<path d="M14 2 C15.4 2 16 5.5 16 8 L16 10.5 L26.5 15.8 L26.5 17.6 L16 14.4 L16 20 L20 23.2 L20 25 L14 23.6 L8 25 L8 23.2 L12 20 L12 14.4 L1.5 17.6 L1.5 15.8 L12 10.5 L12 8 C12 5.5 12.6 2 14 2 Z" fill="${C.ink}" stroke="${C.bg}" stroke-width="0.8" stroke-linejoin="round"/>
+</svg>`;
+
+export type MarkerTone = 'nominal' | 'caution' | 'critical';
+
+const MARKER_TONE_COLOR: Record<MarkerTone, string> = {
+  nominal: C.ink,
+  caution: C.caution,
+  critical: C.critical,
+};
 
 const SRC = {
   route: 'aerotwin-route',
@@ -40,7 +55,6 @@ const SRC = {
   zones: 'aerotwin-zones',
   draft: 'aerotwin-draft-zone',
   ring: 'aerotwin-link-ring',
-  aircraft: 'aerotwin-aircraft',
   airports: 'aerotwin-airports',
   dem: 'aerotwin-dem',
 } as const;
@@ -59,7 +73,6 @@ const LAYER = {
   airportIcon: 'aerotwin-airport-icon',
   airports: 'aerotwin-airport-symbols',
   airportsMinor: 'aerotwin-airport-symbols-minor',
-  aircraft: 'aerotwin-aircraft-dot',
   hillshade: 'aerotwin-hillshade',
   hatch: 'aerotwin-denied-hatch',
 } as const;
@@ -92,6 +105,10 @@ export interface RehearsalMapProps {
   /** Mission clock, s; shows the aircraft marker only when not null. */
   clockS?: number | null;
   showMarker?: boolean;
+  /** State colour of the aircraft marker ring. */
+  markerTone?: MarkerTone;
+  /** Centres the camera on the aircraft whenever it moves. */
+  follow?: boolean;
   /** Enables click-to-add, node/site/ground dragging, insert handles and zones. */
   editor?: boolean;
   fitPadding?: FitPadding;
@@ -281,7 +298,21 @@ const OVERLAY_LAYERS: LayerSpecification[] = [
     type: 'line',
     source: SRC.flown,
     layout: { 'line-cap': 'round', 'line-join': 'round' },
-    paint: { 'line-color': C.activeTrack, 'line-width': 2 },
+    paint: {
+      'line-width': 3,
+      // C.activeTrack fading from the tail to the aircraft.
+      'line-gradient': [
+        'interpolate',
+        ['linear'],
+        ['line-progress'],
+        0,
+        'rgba(94, 156, 154, 0)',
+        0.35,
+        'rgba(94, 156, 154, 0.35)',
+        1,
+        'rgba(94, 156, 154, 1)',
+      ],
+    },
   },
   {
     id: LAYER.airports,
@@ -305,17 +336,6 @@ const OVERLAY_LAYERS: LayerSpecification[] = [
       ['==', ['get', 'type'], 'heliport'],
     ],
     layout: { 'icon-image': LAYER.airportIcon, 'icon-size': 0.8, 'icon-allow-overlap': false },
-  },
-  {
-    id: LAYER.aircraft,
-    type: 'circle',
-    source: SRC.aircraft,
-    paint: {
-      'circle-radius': 4.5,
-      'circle-color': C.activeTrack,
-      'circle-stroke-color': C.bg,
-      'circle-stroke-width': 2,
-    },
   },
 ];
 
@@ -450,11 +470,14 @@ function flownFc(
   }
   const plan = currentPlan(wps, weather);
   const end = Math.min(clockS, plan.totalS);
-  if (end <= 0) return { type: 'FeatureCollection', features: [] };
-  const n = Math.min(600, Math.max(2, Math.ceil(end / 10)));
+  // The track window is 90 simulation seconds, converted to mission clock.
+  const tailS = (TRAIL_SIM_S / REHEARSAL_SIM_SPAN_S) * plan.totalS;
+  const start = Math.max(0, end - tailS);
+  if (end - start <= 1e-6) return { type: 'FeatureCollection', features: [] };
+  const n = 360;
   const coordinates: [number, number][] = [];
   for (let i = 0; i <= n; i++) {
-    const p = positionAtClock(plan, wps, (end * i) / n);
+    const p = positionAtClock(plan, wps, start + ((end - start) * i) / n);
     if (p) coordinates.push([p.lon, p.lat]);
   }
   if (coordinates.length < 2) return { type: 'FeatureCollection', features: [] };
@@ -535,6 +558,8 @@ export default function RehearsalMap({
   weather,
   clockS = null,
   showMarker = false,
+  markerTone = 'nominal',
+  follow = false,
   editor = false,
   fitPadding = { top: 48, right: 48, bottom: 48, left: 48 },
   height = '100%',
@@ -545,8 +570,31 @@ export default function RehearsalMap({
   const labelRef = useRef<LabelEntry[]>([]);
   const lastFitSeq = useRef<number | null>(null);
   const clickTimer = useRef<number | null>(null);
-  const dataRef = useRef({ mission, waypoints, weather, clockS, showMarker, editor });
-  dataRef.current = { mission, waypoints, weather, clockS, showMarker, editor };
+  const dataRef = useRef({
+    mission,
+    waypoints,
+    weather,
+    clockS,
+    showMarker,
+    markerTone,
+    follow,
+    editor,
+  });
+  dataRef.current = {
+    mission,
+    waypoints,
+    weather,
+    clockS,
+    showMarker,
+    markerTone,
+    follow,
+    editor,
+  };
+  const aircraftRef = useRef<{
+    marker: MaplibreMarker;
+    el: HTMLElement;
+    rotor: HTMLElement;
+  } | null>(null);
 
   const [mapReady, setMapReady] = useState(false);
   const selectedNodeId = useMissionStore((s) => s.selectedNodeId);
@@ -568,7 +616,7 @@ export default function RehearsalMap({
       flownFc(d.waypoints, d.weather, d.clockS),
     );
 
-    let cp: { lat: number; lon: number } | null = null;
+    let cp: { lat: number; lon: number; bearingDeg: number } | null = null;
     if (d.showMarker && d.clockS !== null && d.waypoints.length > 1) {
       const total = currentPlan(d.waypoints, d.weather).totalS;
       if (total > 0) {
@@ -576,19 +624,16 @@ export default function RehearsalMap({
         cp = missionClockPosition(d.waypoints, d.weather, clock);
       }
     }
-    const aircraft: FeatureCollection<Point> = {
-      type: 'FeatureCollection',
-      features: cp
-        ? [
-            {
-              type: 'Feature',
-              properties: {},
-              geometry: { type: 'Point', coordinates: [cp.lon, cp.lat] },
-            },
-          ]
-        : [],
-    };
-    (map.getSource(SRC.aircraft) as GeoJSONSource | undefined)?.setData(aircraft);
+    const aircraft = aircraftRef.current;
+    if (aircraft) {
+      aircraft.el.style.display = cp ? '' : 'none';
+      if (cp) {
+        aircraft.marker.setLngLat([cp.lon, cp.lat]);
+        aircraft.el.style.borderColor = MARKER_TONE_COLOR[d.markerTone];
+        aircraft.rotor.style.transform = `rotate(${cp.bearingDeg}deg)`;
+        if (d.follow) map.jumpTo({ center: [cp.lon, cp.lat] });
+      }
+    }
   }, []);
 
   // Map is created once; data and labels flow through refs and effects.
@@ -636,6 +681,7 @@ export default function RehearsalMap({
           map.addSource(id, {
             type: 'geojson',
             data: id === SRC.airports ? AIRPORTS_FC : EMPTY,
+            lineMetrics: id === SRC.flown,
           });
         }
       }
@@ -728,6 +774,32 @@ export default function RehearsalMap({
     };
   }, [pushAll]);
 
+  // Aircraft is a DOM marker, so it stacks above every route, zone and
+  // waypoint layer without a canvas draw order dependency.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const el = document.createElement('div');
+    el.className = styles.aircraft;
+    el.style.display = 'none';
+    const rotor = document.createElement('div');
+    rotor.className = styles.aircraftRotor;
+    rotor.innerHTML = UAV_SVG;
+    el.appendChild(rotor);
+    const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+      .setLngLat([79, 22])
+      .addTo(map);
+    // MapLibre labels every marker "Map marker"; ours needs its own name.
+    el.setAttribute('role', 'img');
+    el.setAttribute('aria-label', 'Aircraft');
+    aircraftRef.current = { marker, el, rotor };
+    pushAll();
+    return () => {
+      marker.remove();
+      aircraftRef.current = null;
+    };
+  }, [mapReady, pushAll]);
+
   // Fit-to-route on first paint and whenever a whole mission is loaded.
   useEffect(() => {
     const map = mapRef.current;
@@ -752,7 +824,7 @@ export default function RehearsalMap({
   // Route, zones, link ring and aircraft data.
   useEffect(() => {
     pushAll();
-  }, [pushAll, mission, waypoints, weather, clockS, showMarker]);
+  }, [pushAll, mission, waypoints, weather, clockS, showMarker, markerTone, follow]);
 
   useEffect(() => {
     const map = mapRef.current;

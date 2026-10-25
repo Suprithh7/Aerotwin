@@ -147,6 +147,7 @@ export default function FlyStage() {
   const [payloadView, setPayloadView] = useState<PayloadView | null>(null);
   const [payloadError, setPayloadError] = useState<string | null>(null);
   const [jammed, setJammed] = useState(false);
+  const [follow, setFollow] = useState(false);
 
   const ctxRef = useRef({ mission, plan, script, waypoints, weather });
   ctxRef.current = { mission, plan, script, waypoints, weather };
@@ -157,7 +158,7 @@ export default function FlyStage() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== 'j' || event.repeat) return;
+      if (event.repeat) return;
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       const target = event.target as HTMLElement | null;
       if (
@@ -166,8 +167,13 @@ export default function FlyStage() {
       ) {
         return;
       }
-      jammedRef.current = !jammedRef.current;
-      setJammed(jammedRef.current);
+      const key = event.key.toLowerCase();
+      if (key === 'j') {
+        jammedRef.current = !jammedRef.current;
+        setJammed(jammedRef.current);
+      } else if (key === 'c') {
+        setFollow((v) => !v);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -389,6 +395,8 @@ export default function FlyStage() {
   navRowsRef.current = nav.rows;
 
   const hud = hudStatus(shownSnap, diagnosis, script, injected);
+  const markerTone =
+    hud.state === 'CRITICAL' ? 'critical' : hud.state === 'NOMINAL' ? 'nominal' : 'caution';
   const r = shownSnap?.readings;
   const chts = [r?.cht1.measured, r?.cht2.measured, r?.cht3.measured, r?.cht4.measured];
   const twinChts = [r?.cht1.twin, r?.cht2.twin, r?.cht3.twin, r?.cht4.twin];
@@ -416,6 +424,8 @@ export default function FlyStage() {
           weather={weather}
           clockS={ready ? missionS : null}
           showMarker
+          markerTone={markerTone}
+          follow={follow}
           height="100%"
           fitPadding={{ top: 120, right: 380, bottom: 220, left: 120 }}
         />
@@ -463,6 +473,14 @@ export default function FlyStage() {
                 </button>
               ))}
             </div>
+            <button
+              className={`h-7 px-2 font-mono text-[11px] ${follow ? 'active' : ''}`}
+              onClick={() => setFollow((v) => !v)}
+              aria-pressed={follow}
+              title="Toggle camera follow (C)"
+            >
+              {follow ? 'CAM FOLLOW [C]' : 'CAM FREE [C]'}
+            </button>
           </div>
         </div>
 
