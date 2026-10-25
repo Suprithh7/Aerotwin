@@ -39,6 +39,26 @@ export const RUL_RECOMPUTE_S = 5;
 export const RUL_CRIT_P10_S = 900;
 
 export type DiagState = 'NOMINAL' | 'WARNING' | 'CRITICAL';
+export type AlertType = 'LIMIT' | 'FAULT';
+
+/**
+ * A LIMIT is a measured channel beyond its operating limit, independent of the
+ * twin. A FAULT is a twin disagreement the signature library can name.
+ */
+export interface DiagAlert {
+  type: AlertType;
+  state: Exclude<DiagState, 'NOMINAL'>;
+  text: string;
+}
+
+export interface LimitBreachInfo {
+  channel: string;
+  label: string;
+  value: number;
+  limit: number;
+  unit: string;
+  direction: 'above' | 'below';
+}
 
 export interface FaultCandidate {
   key: string; // `${kind}|${cylinder}`
@@ -60,7 +80,8 @@ export interface Diagnosis {
   dominant: FaultCandidate | null;
   candidates: FaultCandidate[];
   rul: RulEstimate | null;
-  limitBreach: string | null;
+  /** LIMIT and FAULT alerts, most severe first. */
+  alerts: DiagAlert[];
   note: string;
 }
 
@@ -75,7 +96,7 @@ export const NO_DIAGNOSIS: Diagnosis = {
   dominant: null,
   candidates: [],
   rul: null,
-  limitBreach: null,
+  alerts: [],
   note: 'NO DIAGNOSIS',
 };
 
@@ -144,16 +165,50 @@ export function fitSignatures(z: number[], lib: SignatureLibrary, phase: Phase):
   return { candidates: candidates.slice(0, TOP_CANDIDATES), anomaly };
 }
 
-/** Hard-limit check on the measured values, independent of any signature fit. */
-export function limitBreach(snap: Snapshot): string | null {
+/** Hard-limit checks on the measured values, independent of any signature fit. */
+export function limitBreaches(snap: Snapshot): LimitBreachInfo[] {
   const r = snap.readings;
+  const out: LimitBreachInfo[] = [];
   for (const c of CHANNELS) {
     if (!c.id.startsWith('cht')) continue;
-    if (r[c.id].measured > CHT_LIMIT_C) return `${c.label} ${r[c.id].measured.toFixed(1)} C`;
+    if (r[c.id].measured > CHT_LIMIT_C) {
+      out.push({
+        channel: c.id,
+        label: c.label,
+        value: r[c.id].measured,
+        limit: CHT_LIMIT_C,
+        unit: 'C',
+        direction: 'above',
+      });
+    }
   }
-  if (r.oilT.measured > OILT_LIMIT_C) return `OIL TEMP ${r.oilT.measured.toFixed(1)} C`;
-  if (r.oilP.measured < OILP_MIN_BAR) return `OIL PRESS ${r.oilP.measured.toFixed(2)} BAR`;
-  return null;
+  if (r.oilT.measured > OILT_LIMIT_C) {
+    out.push({
+      channel: 'oilT',
+      label: 'Oil Temp',
+      value: r.oilT.measured,
+      limit: OILT_LIMIT_C,
+      unit: 'C',
+      direction: 'above',
+    });
+  }
+  if (r.oilP.measured < OILP_MIN_BAR) {
+    out.push({
+      channel: 'oilP',
+      label: 'Oil Press',
+      value: r.oilP.measured,
+      limit: OILP_MIN_BAR,
+      unit: 'bar',
+      direction: 'below',
+    });
+  }
+  return out;
+}
+
+export function formatLimitBreach(b: LimitBreachInfo): string {
+  const val = b.unit === 'bar' ? b.value.toFixed(2) : b.value.toFixed(1);
+  const lim = b.unit === 'bar' ? b.limit.toFixed(2) : b.limit.toFixed(0);
+  return `${b.label} ${b.direction} operating limit (${val} ${b.unit} / ${lim} ${b.unit})`;
 }
 
 export class Diagnoser {
@@ -176,32 +231,44 @@ export class Diagnoser {
     }
     const { candidates, anomaly } = fitSignatures(z, this.lib, snap.phase);
     const top = candidates[0] ?? null;
-    const breach = limitBreach(snap);
+    const breaches = limitBreaches(snap);
     const detected = !!top && anomaly >= ANOMALY_MAG && top.severity >= WARN_SEVERITY;
+    // "Residual is small" is the same RMS gate the fault detector uses.
+    const smallResidual = anomaly < ANOMALY_MAG;
 
     this.trackHistory(detected ? top : null, snap.t);
     const rul = this.projectRul(twin, snap, detected);
 
-    let state: DiagState;
-    let note: string;
-    if (detected && (top!.severity >= CRIT_SEVERITY || !!breach || (rul?.critical ?? false) || (rul?.p10S ?? Infinity) < RUL_CRIT_P10_S)) {
-      state = 'CRITICAL';
-      note = breach ? `LIMIT BREACH: ${breach}` : rul?.critical ? 'PROJECTED END OF LIFE' : 'SEVERE DEGRADATION';
-    } else if (detected) {
-      state = 'WARNING';
-      note = 'DEGRADED PERFORMANCE';
-    } else if (breach) {
-      // Over temperature or low oil pressure with no engine signature to blame:
-      // the condition is real even when the classifier cannot name a cause.
-      state = 'CRITICAL';
-      note = `LIMIT BREACH: ${breach}`;
-    } else if (top && anomaly >= ANOMALY_MAG) {
-      state = 'NOMINAL';
-      note = `LOW CONFIDENCE FIT: ${top.label}`;
-    } else {
-      state = 'NOMINAL';
-      note = 'NO ANOMALY';
+    const alerts: DiagAlert[] = breaches.map((b) => ({
+      type: 'LIMIT',
+      state: 'CRITICAL',
+      text: `${formatLimitBreach(b)}.${!detected && smallResidual ? ' Engine behaving as modelled.' : ''}`,
+    }));
+
+    if (detected) {
+      const critical =
+        top!.severity >= CRIT_SEVERITY ||
+        (rul?.critical ?? false) ||
+        (rul?.p10S ?? Infinity) < RUL_CRIT_P10_S;
+      alerts.push({
+        type: 'FAULT',
+        state: critical ? 'CRITICAL' : 'WARNING',
+        text: `Twin disagreement: ${top!.label} (severity ${top!.severity.toFixed(2)}, confidence ${top!.confidence.toFixed(2)}).`,
+      });
     }
+
+    // Highest severity wins; a measured hard limit outranks a fault on a tie.
+    const rank = (a: DiagAlert) => (a.state === 'CRITICAL' ? 2 : 1);
+    alerts.sort(
+      (a, b) => rank(b) - rank(a) || (a.type === b.type ? 0 : a.type === 'LIMIT' ? -1 : 1),
+    );
+    const primary = alerts[0] ?? null;
+    const state: DiagState = primary ? primary.state : 'NOMINAL';
+    const note = primary
+      ? `${primary.type}: ${primary.text}`
+      : top && anomaly >= ANOMALY_MAG
+        ? `LOW CONFIDENCE FIT: ${top.label}`
+        : 'NO ANOMALY';
 
     return {
       t: snap.t,
@@ -214,7 +281,7 @@ export class Diagnoser {
       dominant: detected ? top : null,
       candidates,
       rul: detected ? rul : null,
-      limitBreach: breach,
+      alerts,
       note,
     };
   }

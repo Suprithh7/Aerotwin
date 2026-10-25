@@ -100,6 +100,19 @@ Sensor "noise spike" adds `0.35·driftRange·severity` to σ
 Twin time constant `EWMA_TAU_S` = 0.8 s; EWMA update α = dt/(τ+dt)
 (`sim.ts:183`); z-score divides the residual by the channel noise σ.
 
+## LIMIT vs FAULT alerts — `src/diagnosis/diagnose.ts:42-56`, `:173-290`
+LIMIT and FAULT are independent alert types. A LIMIT is a measured channel
+beyond its operating limit (any cylinder CHT, oil temperature, minimum oil
+pressure) and is always CRITICAL. A FAULT is a twin disagreement the signature
+library can name; it is WARNING unless its severity, the RUL projection or the
+P10 life makes it CRITICAL. The diagnosis chip shows the higher of the two
+(a hard limit wins a tie), and both the chip tooltip and the alert list name
+the type. When a limit is present with no fault and the residual RMS is below
+`ANOMALY_MAG` (2 z), the limit text reads
+`{channel} {above|below} operating limit ({value} / {limit}). Engine behaving as modelled.`
+An over-limit condition with no matched signature but a large residual is not
+described as modelled.
+
 ## Mission / demo setup
 `INITIAL_FUEL_KG` = 42 kg (`constants.ts:84`).
 Default scenario: cruise, 3000 m, ISA +0, no turbulence, seed 1337

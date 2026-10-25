@@ -26,12 +26,18 @@ function fmtMin(s: number | null): string {
 export default function DiagnosisPanel() {
   const d = useSimStore((s) => s.diagnosis);
   const rul = d.rul;
+  const chipTitle = d.alerts.length
+    ? d.alerts.map((a) => `${a.type} ${a.state}: ${a.text}`).join('\n')
+    : 'No LIMIT or FAULT alert';
 
   return (
     <div className="border-b border-edge p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="font-mono text-dim uppercase tracking-wide">Diagnosis</span>
-        <span className={`border px-2 py-0.5 font-mono uppercase tracking-wide ${STATE_CLASS[d.state]}`}>
+        <span
+          title={chipTitle}
+          className={`border px-2 py-0.5 font-mono uppercase tracking-wide ${STATE_CLASS[d.state]}`}
+        >
           {d.state}
         </span>
       </div>
@@ -58,6 +64,23 @@ export default function DiagnosisPanel() {
             </div>
           )}
           <div className="mt-2 border-t border-edge pt-1">
+            <div className="text-dim uppercase">Alerts</div>
+            {d.alerts.length === 0 ? (
+              <div className="text-dim">{d.note}</div>
+            ) : (
+              d.alerts.map((a, i) => (
+                <div
+                  key={`${a.type}-${i}`}
+                  title={`${a.type} ${a.state}: ${a.text}`}
+                  className={`mt-1 flex gap-1 ${a.state === 'CRITICAL' ? 'text-red' : 'text-amber'}`}
+                >
+                  <span className="shrink-0">[{a.type}]</span>
+                  <span>{a.text}</span>
+                </div>
+              ))
+            )}
+          </div>
+          <div className="mt-2 border-t border-edge pt-1">
             <div className="text-dim uppercase">Remaining useful life</div>
             {!rul || rul.status !== 'OK' ? (
               <div className="text-dim">
@@ -78,7 +101,6 @@ export default function DiagnosisPanel() {
               </>
             )}
           </div>
-          <div className={`mt-2 border-t border-edge pt-1 ${d.state === 'NOMINAL' ? 'text-dim' : ''}`}>{d.note}</div>
         </div>
       )}
     </div>

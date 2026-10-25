@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Sim } from '../../sim/sim';
 import { buildSignatureLibrary, signaturesForPhase } from '../signatures';
 import { ANOMALY_MAG, CRIT_SEVERITY, Diagnoser, fitSignatures } from '../diagnose';
+import { CHT_LIMIT_C } from '../rul';
 import type { Diagnosis } from '../diagnose';
 
 const lib = buildSignatureLibrary();
@@ -124,3 +125,47 @@ describe('diagnosis classification', () => {
 function zeros(): number[] {
   return new Array<number>(18).fill(0);
 }
+
+describe('LIMIT vs FAULT alerts', () => {
+  function nominalSnap() {
+    const sim = new Sim({
+      seed: 2024,
+      scenario: { phase: 'cruise', turbulence: 'none', isaDev: 0, altitude: 3000 },
+    });
+    for (let i = 0; i < 200; i++) sim.step();
+    return { sim, snap: sim.snapshot() };
+  }
+
+  it('names an over-limit channel as a LIMIT and reports the modelled engine', () => {
+    const { sim, snap } = nominalSnap();
+    snap.readings.cht3.measured = CHT_LIMIT_C + 7.3;
+    const d = new Diagnoser(lib).update(zeros(), sim.twinVector(), snap, true);
+
+    expect(d.state).toBe('CRITICAL');
+    expect(d.alerts).toHaveLength(1);
+    expect(d.alerts[0].type).toBe('LIMIT');
+    expect(d.alerts[0].text).toBe(
+      `CHT Cyl 3 above operating limit (${(CHT_LIMIT_C + 7.3).toFixed(1)} C / ${CHT_LIMIT_C} C). Engine behaving as modelled.`,
+    );
+    expect(d.note.startsWith('LIMIT:')).toBe(true);
+    expect(d.dominant).toBeNull();
+  });
+
+  it('keeps LIMIT and FAULT separate and puts the chip on the higher severity', () => {
+    const { sim, snap } = nominalSnap();
+    const sig = signaturesForPhase(lib, 'cruise').find((s) => s.kind === 'cooling' && s.cylinder === 3)!;
+    // A mid-severity fault residual (below CRIT_SEVERITY) plus a hard limit.
+    const z = sig.sev1.map((v) => v * 0.35);
+    snap.readings.cht3.measured = CHT_LIMIT_C + 10;
+    const d = new Diagnoser(lib).update(z, sim.twinVector(), snap, true);
+
+    // The FAULT is only a warning; the hard LIMIT sets the chip.
+    expect(d.severity).toBeLessThan(CRIT_SEVERITY);
+    expect(d.state).toBe('CRITICAL');
+    expect(d.alerts.map((a) => a.type)).toEqual(['LIMIT', 'FAULT']);
+    expect(d.alerts[1].state).toBe('WARNING');
+    expect(d.alerts[1].text).toContain('Twin disagreement');
+    expect(d.alerts[1].text).toContain('Cooling degradation (cyl 3)');
+    expect(d.note.startsWith('LIMIT:')).toBe(true);
+  });
+});
