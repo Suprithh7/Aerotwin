@@ -1,10 +1,19 @@
 // All physical constants here are documented assumptions (see ASSUMPTIONS.md).
-import type { ChannelMeta, Phase, TurbulenceLevel } from './types';
+import type { ChannelMeta, Phase, Scenario, TurbulenceLevel } from './types';
 
 export const SIM_DT = 0.05; // s, fixed 20 Hz sim step
 export const HIST_INTERVAL = 0.1; // s, chart sample stride (10 Hz sim)
 export const HIST_WINDOW_S = 120; // s of chart history
 export const EWMA_TAU_S = 0.8; // s, residual z-score smoothing time constant
+
+// The app opens here: a settled engine at a normal cruise altitude with no
+// faults. Store, worker and headless harness share this one definition.
+export const DEFAULT_SCENARIO: Scenario = {
+  phase: 'cruise',
+  turbulence: 'none',
+  isaDev: 0,
+  altitude: 3000,
+};
 
 export const N_CYL = 4;
 

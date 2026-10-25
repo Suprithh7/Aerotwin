@@ -3,6 +3,7 @@ import { Sim } from '../../sim/sim';
 import { buildSignatureLibrary, signaturesForPhase } from '../signatures';
 import { ANOMALY_MAG, CRIT_SEVERITY, Diagnoser, fitSignatures } from '../diagnose';
 import { CHT_LIMIT_C } from '../../sim/limits';
+import { DEFAULT_SCENARIO } from '../../sim/constants';
 import type { Diagnosis } from '../diagnose';
 
 const lib = buildSignatureLibrary();
@@ -50,6 +51,14 @@ describe('diagnosis classification', () => {
     expect(d.state).toBe('NOMINAL');
     expect(d.anomaly).toBeLessThan(ANOMALY_MAG);
     expect(d.dominant).toBeNull();
+  });
+
+  it('opens on the shared default scenario with no alerts', () => {
+    expect(DEFAULT_SCENARIO.phase).toBe('cruise');
+    expect(DEFAULT_SCENARIO.altitude).toBeGreaterThanOrEqual(1500);
+    const { d } = run({ ...DEFAULT_SCENARIO, phase: 'cruise' }, null, 30, 0);
+    expect(d.state).toBe('NOMINAL');
+    expect(d.alerts).toEqual([]);
   });
 
   it('names a cooling loss and scales the state with severity', () => {

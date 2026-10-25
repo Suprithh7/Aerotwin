@@ -1,6 +1,6 @@
 // Simulation Web Worker: runs the 20 Hz model, posts UI state at 10 Hz.
 import { Sim } from './sim';
-import { HIST_WINDOW_S, SIM_DT } from './constants';
+import { DEFAULT_SCENARIO, HIST_WINDOW_S, SIM_DT } from './constants';
 import { Diagnoser, type Diagnosis } from '../diagnosis/diagnose';
 import { createSignatureBuilder } from '../diagnosis/signatures';
 import type { FaultSpec, HistPoint, Scenario, Snapshot } from './types';
@@ -18,10 +18,7 @@ export type WorkerMessage =
   | { type: 'reset' }
   | { type: 'tick'; snapshot: Snapshot; records: HistPoint[]; diagnosis: Diagnosis };
 
-let sim = new Sim({
-  seed: 1337,
-  scenario: { phase: 'cruise', turbulence: 'none', isaDev: 0, altitude: 3000 },
-});
+let sim = new Sim({ seed: 1337, scenario: DEFAULT_SCENARIO });
 let speed = 1;
 let paused = false;
 let pendingSteps = 0;

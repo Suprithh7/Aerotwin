@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { runSim, settleValue, DEFAULT_SCENARIO } from '../harness';
+import { runSim, settleValue } from '../harness';
+import { DEFAULT_SCENARIO } from '../constants';
 import type { ChannelId, FaultSpec } from '../types';
 
 const ev = (at: number, fault: Omit<FaultSpec, 'id' | 'tInject'>) => ({ at, fault });

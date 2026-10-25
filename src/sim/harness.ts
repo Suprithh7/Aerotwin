@@ -1,13 +1,7 @@
 // Headless simulation harness for tests and calibration.
 import { Sim } from './sim';
+import { DEFAULT_SCENARIO } from './constants';
 import type { ChannelId, FaultSpec, Scenario } from './types';
-
-export const DEFAULT_SCENARIO: Scenario = {
-  phase: 'cruise',
-  turbulence: 'none',
-  isaDev: 0,
-  altitude: 3000,
-};
 
 export interface RunEvent {
   at: number; // sim seconds

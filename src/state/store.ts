@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { ChannelId, FaultSpec, HistPoint, Scenario, Snapshot } from '../sim/types';
 import type { WorkerCommand, WorkerMessage } from '../sim/worker';
-import { HIST_WINDOW_S, INITIAL_FUEL_KG } from '../sim/constants';
+import { DEFAULT_SCENARIO, HIST_WINDOW_S, INITIAL_FUEL_KG } from '../sim/constants';
 import { NO_DIAGNOSIS, type Diagnosis } from '../diagnosis/diagnose';
 import { FF_SMOOTH_WINDOW_S } from '../nav/alternates';
 
@@ -28,13 +28,6 @@ export interface SimStore {
   injectFault: (spec: FaultInput) => void;
   clearFault: (id: number) => void;
 }
-
-export const DEFAULT_SCENARIO: Scenario = {
-  phase: 'cruise',
-  turbulence: 'none',
-  isaDev: 0,
-  altitude: 3000,
-};
 
 let worker: Worker | null = null;
 
