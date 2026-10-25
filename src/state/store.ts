@@ -14,6 +14,8 @@ export interface SimStore {
   ffSmoothKgH: number;
   speed: number;
   paused: boolean;
+  /** Increments whenever the worker confirms a config reset. */
+  simEpoch: number;
   seedInput: string;
   scenario: Scenario;
   fuelLoadKg: number;
@@ -53,7 +55,7 @@ export const useSimStore = create<SimStore>((set, get) => {
     const msg = e.data;
     if (msg.type === 'reset') {
       ffWindow.length = 0;
-      set({ history: [], diagnosis: NO_DIAGNOSIS, ffSmoothKgH: 0 });
+      set({ history: [], diagnosis: NO_DIAGNOSIS, ffSmoothKgH: 0, simEpoch: get().simEpoch + 1 });
       return;
     }
     const cutoff = msg.snapshot.t - HIST_WINDOW_S;
@@ -79,6 +81,7 @@ export const useSimStore = create<SimStore>((set, get) => {
     ffSmoothKgH: 0,
     speed: 1,
     paused: false,
+    simEpoch: 0,
     seedInput: '1337',
     scenario: DEFAULT_SCENARIO,
     fuelLoadKg: INITIAL_FUEL_KG,

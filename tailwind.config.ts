@@ -14,6 +14,7 @@ export default {
       steel: '#5B8DB8',
       amber: '#C9922E',
       red: '#C4443F',
+      data: '#5E9C9A',
     },
     extend: {
       fontFamily: {

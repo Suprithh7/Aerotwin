@@ -652,3 +652,129 @@ observations from wiring the mission layer to the unchanged model:
   kW. Loss of boost is the only engine fault that reaches the glide branch in
   the sim's altitude band; compression loss alone does not. This is reported,
   not corrected — the physical model was not touched.
+
+## Rehearsal mode — stages, scripts, life and map (October 2026)
+The app now opens on a three-stage rehearsal: BRIEF → FLY → DEBRIEF
+(`App.tsx:45-47`). The existing console (top bar, fault injection, strip
+charts, diagnosis, schematic, validation map and Monte Carlo panel) is still
+the same code, mounted full screen behind the E key
+(`App.tsx:23-41`, `EngineerOverlay.tsx:61-118`). Nothing from the overlay is
+rendered on the three stages. Esc closes the overlay and leaves every store
+untouched, so the run continues from the same epoch, clock, pause and speed.
+
+### Time compression
+- One rehearsal spans **120 simulation seconds**, irrespective of the planned
+  mission (`clock.ts:6`). Mission clock = `clamp01(simT / 120) * plannedS`,
+  where `plannedS` is the whole planned flight time in mission seconds
+  (`clock.ts:11-14`). Every HUD, ticker and debrief time is mission time; the
+  compressed sim time is never shown.
+- Mission time is clamped at the span, so a delayed sample cannot overshoot the
+  planned duration (`FlyStage.tsx:223`).
+- A normal flight finishes at exactly 120 sim s and reports the planned
+  duration and cruise distance (`FlyStage.tsx:287-295`). An abort is held for
+  **2400 ms** after the first measured hard limit so the crew sees the state
+  before the debrief arrives (`FlyStage.tsx:25`, `:272`).
+- Debrief timeline uses the planned duration as its finish line; an aborted run
+  therefore reads e.g. `4:00:11 of 7:04:00` rather than shortening the plan to
+  the abort point (`DebriefStage.tsx:67`, `:130`). Tick labels are measured and
+  stacked into up to three rows when events cluster, so a fault, the twin flag
+  and the limit that follows remain readable (`DebriefStage.tsx:72-88`,
+  `:134-164`).
+
+### Scenario scripts
+Scripts are the only fault source in a rehearsal; a run starts from the
+default healthy engine, and each card injects at **20 % of the planned
+mission** (`scripts.ts:23`, `:37`). On the 7 h 04 min Ladakh mission that is
+4 800 mission seconds (24 of the 120 sim seconds).
+- **NORMAL FLIGHT** — no fault (`scripts.ts:9-16`).
+- **COOLING FAILURE** — engine `cooling`, cylinder **3**, severity **0.8**,
+  ramp **30 s** (`scripts.ts:18-31`). In the live run this reaches WARNING with
+  the cylinder delta first, then a measured CHT limit; the test run at 60x read
+  WARNING at 2:50 with +11 °C, WARNING at 3:11 with +25 °C, and CRITICAL at
+  3:53 on the 7 h 04 min mission.
+- **SENSOR GLITCH** — sensor `drift`, CHT 1, severity **0.5**, ramp **10 s**,
+  flagged as `sensorOnly` (`scripts.ts:32-45`). Its measured offset peaks around
+  21-24 °C, below the 135 °C CHT limit, so the rehearsal stays at ADVISORY to
+  the end; this is the false alarm the script is named for. Measured values,
+  not true values, gate the hard limits, so a larger drift would still abort
+  (`presentation.ts:104-117`). The ADVISORY sentence names the channel and the
+  measured-minus-true offset: “Engine healthy, instrument fault: CHT Cyl 1 reads
+  N C above the twin.” (`presentation.ts:108-117`).
+
+### Engine life
+The life model is unchanged from M2 and now integrates the rehearsal:
+`weight = max(1, exp((maxCHTtrue − 110 °C) / 15 °C))`, and dose =
+`simDt × (plannedS / 120) × weight`, using the hottest **true** CHT
+(`metrics.ts:16-32`). The assumed overhaul life is **1200 h**; the result is
+shown as percent used and equivalent hours in the debrief
+(`DebriefStage.tsx:117-121`). At 1200 h, 1 equivalent hour is 0.0833 % of the
+overhaul life.
+
+### Briefing risk
+The MISSION RISK verdict is the existing Monte Carlo result (200 runs, seed
+1337) reduced to GO / CAUTION / NO-GO; the three highest-|correlation| factors
+are rendered as plain sentences from `factorSentence` (`metrics.ts:111-123`).
+While the worker is still sampling the panel says ASSESSING with `done/total`;
+the RUN button is available throughout, so a rehearsal can start without
+waiting for the full Monte Carlo.
+
+### HUD rules applied
+- Panel surface is `bg-1` at **88 %**, 1 px `line-0` border, square corners,
+  no shadow or gradient (`index.css:64-68`).
+- The FLY stage has five overlay groups: engine state + sentence (28 px /
+  16 px), clock/pause/speed (12-13 px), engine strip (12-13 px), nearest
+  landing (12-13 px), ticker (12-13 px). No chart, table, z-score or sigma is
+  mounted on the stage; the only canvas is the map
+  (`FlyStage.tsx:345-458`).
+- Ticker keeps the last three events younger than **8 s** wall time, fading
+  between 6.5 s and 8 s (`FlyStage.tsx:26`, `:89-114`).
+- Data teal `#5E9C9A` is used for measured numeric elements only; the thermal
+  ramp remains the anchored nominal/caution/limit scale
+  (`FlyStage.tsx:396-421`). The nearest-landing readout updates on the existing
+  1 s alternate cadence (`useAlternates.ts:99-103`), so it can read ASSESSING
+  for the first second and then steps between the plan's holds.
+
+### Stage map
+The stages use a new MapLibre view (`RehearsalMap.tsx`), while the E overlay
+keeps the original `MissionMap`. Base is the CARTO dark-matter Protomaps style
+(`RehearsalMap.tsx:25`); all base layers except background, fills and rasters
+are hidden, so no road, rail, place dot or boundary line is drawn
+(`:136-144`). A terrarium DEM adds hillshade at 0.35 exaggeration
+(`:146-170`). State and city symbol layers are added from the `places` source
+from zoom 5, filtered to a rough subcontinent ring that is **not a boundary
+and is never drawn** (`:68-102`, `:172-235`). The ring includes Ladakh and
+excludes the neighbouring capitals checked during tuning (Lahore, Islamabad,
+Karachi, Kabul, Lhasa, Colombo); Kathmandu and Dhaka fall inside this rough
+extent. Region labels are limited by the basemap's own tile contents: they
+appear at country/regional zooms and drop out at the route's ~9-10 zoom because
+the high-zoom `places` tiles do not carry region features. No static state data
+is invented to fill that gap.
+- Route: 6 px background casing plus 2 px steel line, both squared; direction
+  shown by a generated chevron icon every 72 px (`:288-315`, `:254-272`).
+- Waypoints are numbered DOM dots; altitude text is CSS-hidden until hover or
+  selection. DOM labels exist only for HOME, DEST, alternate airfields, the
+  ground station and the denied area (`:641-690`), with collision placement
+  against other labels and a ±12 px waypoint anchor, clamped inside the canvas
+  (`:329-385`).
+- Denied area: pattern hatch, **18 %** fill opacity, 1 px muted-red line, and
+  the fixed label `DENIED AREA (EXERCISE - ILLUSTRATIVE)`
+  (`RehearsalMap.tsx:282`, `zones.ts:7`). The three polygons are small,
+  illustrative, inside their preset region and per `zones.ts:1-5` at least
+  50 km from any land border; they are not real restricted areas. Ground
+  stations are similarly illustrative (`zones.ts:60-64`).
+- Camera: `fitRouteCamera` is explicit Web Mercator math rather than
+  `fitBounds`, with a zoom-10 ceiling and caller padding (FLY uses 96/120 px)
+  so the route is framed inside the HUD (`:404-431`, `FlyStage.tsx:340`).
+  Preset changes use `flyTo` (900 ms); first paint uses `jumpTo`
+  (`RehearsalMap.tsx:618-629`).
+- Basemap failure: if overlays never become ready within 6 s, the style falls
+  back to a flat dark background and the same route/denied layers are added;
+  no glyph stack is required because chevrons are icons (`:33`, `:573-597`).
+
+### Verification baseline
+`npx tsc --noEmit`, `npm run build`, and `npx vitest run` (114 tests) pass.
+Runtime checks at 1440×900 covered: BRIEF preset fly-to and MC GO with three
+factor sentences; cooling WARNING/CRITICAL with cylinder + delta and the
+computed lead line; sensor ADVISORY for a full run; nearest-landing changes
+between holds; ticker fade after 8 s; E/Esc overlay round trip while paused;
+REPLAY and NEW MISSION.

@@ -60,3 +60,18 @@ button.active {
   border-color: #5b8db8;
   color: #5b8db8;
 }
+
+/* HUD surface: bg-1 at 88%, 1px line-0 edge, square corners, no effects. */
+.hud-panel {
+  background-color: rgb(17 21 26 / 0.88);
+  border: 1px solid #232a33;
+  border-radius: 0;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+button:disabled:hover {
+  border-color: #232a33;
+}

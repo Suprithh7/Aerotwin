@@ -1,0 +1,146 @@
+.wrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #0b0d10;
+  outline: none;
+}
+
+.label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 4px;
+  background-color: rgb(11 13 16 / 0.72);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  line-height: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #d7dee7;
+  white-space: nowrap;
+  user-select: none;
+  pointer-events: none;
+}
+
+.home,
+.dest {
+  color: #5b8db8;
+}
+
+.home::before,
+.dest::before,
+.alt::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  flex: 0 0 5px;
+  border: 1px solid #5b8db8;
+  background: #11151a;
+}
+
+.home::before,
+.dest::before {
+  background: #5b8db8;
+}
+
+.alt {
+  color: #93a0b0;
+}
+
+.ground {
+  color: #5e9c9a;
+}
+
+.ground::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border: 1px solid #5e9c9a;
+  transform: rotate(45deg);
+  background: #11151a;
+}
+
+.denied {
+  padding: 2px 5px;
+  border: 1px solid rgb(196 68 63 / 0.65);
+  background-color: rgb(17 21 26 / 0.88);
+  color: #c4443f;
+  font-size: 10px;
+}
+
+/* Numbered waypoint dots. The altitude appears only on hover or selection. */
+.wp {
+  position: relative;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  border: 1px solid #5b8db8;
+  background-color: rgb(17 21 26 / 0.92);
+  color: #5e9c9a;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.wp.sel {
+  border-color: #c9922e;
+  color: #d7dee7;
+}
+
+.wpAlt {
+  display: none;
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  padding: 1px 5px;
+  border: 1px solid #232a33;
+  background-color: rgb(17 21 26 / 0.94);
+  color: #d7dee7;
+  font-size: 10px;
+  line-height: 14px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.wp:hover .wpAlt,
+.wp.sel .wpAlt {
+  display: block;
+}
+
+/* MapLibre chrome: only the compact attribution is kept, and it is flat. */
+.wrap :global(.maplibregl-ctrl-attrib) {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  color: #93a0b0;
+  background-color: rgb(17 21 26 / 0.88);
+  border: 1px solid #232a33;
+  border-radius: 0;
+}
+
+.wrap :global(.maplibregl-ctrl-attrib-inner) {
+  background-color: rgb(17 21 26 / 0.88);
+}
+
+.wrap :global(.maplibregl-ctrl-attrib a) {
+  color: #5b8db8;
+  text-decoration: none;
+}
+
+.wrap :global(.maplibregl-ctrl-attrib-button) {
+  border-radius: 0;
+}
+
+.wrap :global(.maplibregl-ctrl-bottom-right) {
+  z-index: 3;
+}
+
+.wrap :global(.maplibregl-canvas:focus) {
+  outline: none;
+}

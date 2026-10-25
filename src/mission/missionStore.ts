@@ -29,6 +29,8 @@ export interface MissionStore {
   mcDone: number;
   mcTotal: number;
   mcResult: McResult | null;
+  /** Identity of the inputs the stored result was computed from. */
+  mcResultKey: string | null;
   mcError: string | null;
   setRoute: (presetId: string) => void;
   setRouteEditMode: (on: boolean) => void;
@@ -49,6 +51,7 @@ export interface MissionStore {
 }
 
 let wpId = 5000;
+let mcSeq = 0;
 
 function cellsFromPreset(presetId: string, n: number): WeatherCell[] {
   const wx = applyWeatherPreset(presetId, n);
@@ -102,6 +105,7 @@ export const useMissionStore = create<MissionStore>((set, get) => {
     mcDone: 0,
     mcTotal: 0,
     mcResult: null,
+    mcResultKey: null,
     mcError: null,
 
     setRoute: (presetId) => {
@@ -116,6 +120,7 @@ export const useMissionStore = create<MissionStore>((set, get) => {
         routeNotice: null,
         weather: syncWeatherLength(get().weather, get().weatherPresetId, wps.length),
         mcResult: null,
+        mcResultKey: null,
       });
     },
 
@@ -131,6 +136,7 @@ export const useMissionStore = create<MissionStore>((set, get) => {
         routeNotice: null,
         weather: syncWeatherLength(get().weather, get().weatherPresetId, wps.length),
         mcResult: null,
+        mcResultKey: null,
       });
     },
 
@@ -155,6 +161,7 @@ export const useMissionStore = create<MissionStore>((set, get) => {
         routePresetId: 'custom',
         weather: syncWeatherLength(get().weather, get().weatherPresetId, next.length),
         mcResult: null,
+        mcResultKey: null,
       });
       flagClamp(p.clamped);
     },
@@ -163,14 +170,14 @@ export const useMissionStore = create<MissionStore>((set, get) => {
       if (!editGuard()) return;
       const p = clampToPresetBox(get().routeBasePresetId, lat, lon);
       const next = get().waypoints.map((w) => (w.id === id ? { ...w, lat: p.lat, lon: p.lon } : w));
-      set({ waypoints: next, routePresetId: 'custom', mcResult: null });
+      set({ waypoints: next, routePresetId: 'custom', mcResult: null, mcResultKey: null });
       flagClamp(p.clamped);
     },
 
     setWaypointAlt: (id, altM) => {
       if (!editGuard()) return;
       const next = get().waypoints.map((w) => (w.id === id ? { ...w, altM: Math.max(0, Math.round(altM)) } : w));
-      set({ waypoints: next, routePresetId: 'custom', mcResult: null });
+      set({ waypoints: next, routePresetId: 'custom', mcResult: null, mcResultKey: null });
     },
 
     setWaypointLoiter: (id, minutes) => {
@@ -178,7 +185,7 @@ export const useMissionStore = create<MissionStore>((set, get) => {
       const next = get().waypoints.map((w) =>
         w.id === id ? { ...w, loiterMin: Math.max(0, Math.round(minutes)) } : w,
       );
-      set({ waypoints: next, routePresetId: 'custom', mcResult: null });
+      set({ waypoints: next, routePresetId: 'custom', mcResult: null, mcResultKey: null });
     },
 
     deleteWaypoint: (id) => {
@@ -190,6 +197,7 @@ export const useMissionStore = create<MissionStore>((set, get) => {
         routePresetId: 'custom',
         weather: syncWeatherLength(get().weather, get().weatherPresetId, next.length),
         mcResult: null,
+        mcResultKey: null,
       });
     },
 
@@ -199,12 +207,13 @@ export const useMissionStore = create<MissionStore>((set, get) => {
         weather: cellsFromPreset(presetId, get().waypoints.length),
         wxNotice: null,
         mcResult: null,
+        mcResultKey: null,
       });
     },
 
     setWeatherAt: (index, patch) => {
       const next = get().weather.map((c, i) => (i === index ? { ...c, ...patch } : c));
-      set({ weather: next, mcResult: null });
+      set({ weather: next, mcResult: null, mcResultKey: null });
     },
 
     fetchLive: async () => {
@@ -217,15 +226,25 @@ export const useMissionStore = create<MissionStore>((set, get) => {
         fetchingWx: false,
         wxNotice: res.notice,
         mcResult: null,
+        mcResultKey: null,
       });
     },
 
-    setRuns: (n) => set({ runs: Math.max(200, Math.min(1000, Math.round(n) || 200)) }),
-    setSeed: (n) => set({ seed: Math.max(0, Math.round(n) || 0) >>> 0 }),
+    setRuns: (n) =>
+      set({
+        runs: Math.max(200, Math.min(1000, Math.round(n) || 200)),
+        mcResult: null,
+        mcResultKey: null,
+      }),
+    setSeed: (n) =>
+      set({ seed: Math.max(0, Math.round(n) || 0) >>> 0, mcResult: null, mcResultKey: null }),
 
     runMission: async () => {
       const s = get();
-      if (s.mcRunning || s.waypoints.length < 2) return;
+      if (s.waypoints.length < 2) return;
+      // A newer request supersedes an in-flight pool: only the latest request is
+      // allowed to publish progress or results.
+      const seq = ++mcSeq;
       const health = missionHealthInput();
       const req: McRequest = {
         waypoints: s.waypoints,
@@ -236,16 +255,28 @@ export const useMissionStore = create<MissionStore>((set, get) => {
         seed: s.seed,
         growthPerH: null,
       };
-      set({ mcRunning: true, mcError: null, mcDone: 0, mcTotal: s.runs, mcResult: null });
+      const key = missionInputKey(s.waypoints, s.weather, s.runs, s.seed);
+      set({ mcRunning: true, mcError: null, mcDone: 0, mcTotal: s.runs, mcResult: null, mcResultKey: null });
       try {
-        const result = await runMonteCarloPool(req, (done, total) => set({ mcDone: done, mcTotal: total }));
-        set({ mcResult: result, mcRunning: false });
+        const result = await runMonteCarloPool(req, (done, total) => {
+          if (seq === mcSeq) set({ mcDone: done, mcTotal: total });
+        });
+        if (seq !== mcSeq) return;
+        // The route, weather, runs or seed may have changed while the pool was
+        // working; a result computed from inputs that no longer exist is dropped.
+        if (missionInputKey(get().waypoints, get().weather, get().runs, get().seed) !== key) {
+          set({ mcRunning: false });
+          return;
+        }
+        set({ mcResult: result, mcResultKey: key, mcRunning: false });
       } catch (e) {
-        set({ mcRunning: false, mcError: e instanceof Error ? e.message : String(e) });
+        if (seq === mcSeq) {
+          set({ mcRunning: false, mcError: e instanceof Error ? e.message : String(e) });
+        }
       }
     },
 
-    resetMission: () => set({ mcResult: null, mcError: null, mcDone: 0, mcTotal: 0 }),
+    resetMission: () => set({ mcResult: null, mcResultKey: null, mcError: null, mcDone: 0, mcTotal: 0 }),
   };
 });
 
@@ -281,3 +312,13 @@ export function legRiskColor(breachFrac: number): string {
 
 export const WX_PRESET_LIST = WEATHER_PRESETS.map((p) => ({ id: p.id, name: p.name }));
 export const ROUTE_LIST = ROUTE_PRESETS.map((p) => ({ id: p.id, name: p.name, region: p.region }));
+
+/** Input identity for a Monte Carlo result, independent of object identities. */
+export function missionInputKey(
+  waypoints: Waypoint[],
+  weather: WeatherCell[],
+  runs: number,
+  seed: number,
+): string {
+  return JSON.stringify({ w: waypoints, wx: weatherValues(weather), runs, seed });
+}
