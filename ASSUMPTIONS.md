@@ -584,13 +584,13 @@ boost is the only engine fault that reaches the glide branch in this band. A
 Basemap is the CARTO dark-matter style
 (`MissionMap.tsx:31`); it is a visual layer only, and if it has not loaded
 within 6 s the route is drawn on a dark vector fallback with a HUD notice
-(`:144`, `:601-629`) — no risk number depends on it.
+(`:144`, `:727-734`, `:970`) — no risk number depends on it.
 
 Basemap layers are data of a kind the console cannot accept: the style draws
 country-level and disputed boundaries whose depiction does not match India's
 official one. Every layer whose id matches `country|border|disputed|breakaway|
 maritime` is switched to `visibility: none` after each style load, and no
-boundary line is drawn by this app (`:46`, `:553-559`). The test is id-based and
+boundary line is drawn by this app (`:46`, `:679-684`). The test is id-based and
 runs on every `styledata`, so it is idempotent — the `setLayoutProperty` call
 provokes a style reload itself. The CARTO style has four boundary layers,
 `boundary_country_outline` (z6+), `boundary_country_inner` (z0+),
@@ -611,7 +611,7 @@ are drawn from zoom 5.5 and labelled only from zoom 6, because below that the
 labels collide (`:96-97`, `:148`). Route framing is computed from the waypoint
 bounds with 28 px padding and a zoom-10 ceiling rather than MapLibre `fitBounds`,
 which returns no camera when the bounds cannot fit the canvas and the
-constructor then dereferences it (`:145-146`, `:312-324`).
+constructor then dereferences it (`:145-146`, `:367-380`).
 
 Units: altitudes are shown as m AMSL and feet, distances as km and NM
 (`units.ts:9-16`), and the top bar carries wall-clock UTC and IST alongside the
@@ -623,9 +623,9 @@ the whole mission in 600 s of wall time (`App.tsx:15`) so the marker is
 observable at the sim's own speed multipliers. Leg colours on the map and the
 swatch column in the results table both come from the single `legRiskColor`
 ramp (steel #5B8DB8 → red #C4443F, `missionStore.ts:230`, used at
-`MissionMap.tsx:209`), so they cannot disagree. The divert line is drawn only
+`MissionMap.tsx:264`), so they cannot disagree. The divert line is drawn only
 while the diagnosis is off NOMINAL and takes its colour from that alternate's
-verdict (`MissionMap.tsx:250-252`, `:499-500`); the fuel-load field in the
+verdict (`MissionMap.tsx:305-306`, `:604-605`); the fuel-load field in the
 scenario panel (`ScenarioPanel.tsx:88-107`) writes the sim state through
 `Sim.setFuelKg` (`sim.ts:142-150`) without restarting the run, and moves the
 healthy twin with the true engine so a re-load never reads as a residual.

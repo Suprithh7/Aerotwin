@@ -73,6 +73,9 @@ export default function TopBar() {
       <div className="flex items-center gap-1 ml-2 shrink-0">
         <span className="text-dim">SEED</span>
         <input
+          type="text"
+          inputMode="numeric"
+          spellCheck={false}
           className="font-mono w-20 num"
           value={seedInput}
           onChange={(e) => useSimStore.setState({ seedInput: e.target.value })}

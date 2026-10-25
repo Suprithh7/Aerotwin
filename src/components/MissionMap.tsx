@@ -146,8 +146,61 @@ const FIT_PADDING_PX = 28;
 const FIT_MAX_ZOOM = 10;
 /** Reference places stay off the canvas until the camera is close enough to read. */
 const PLACE_LABEL_MIN_ZOOM = 6;
+/** Waypoint altitude tags appear only once the camera is close enough to use them. */
+const LABEL_ALT_MIN_ZOOM = 7;
 /** Keep a divert label this far inside the canvas edge when clipping it. */
 const LABEL_PAD_PX = 24;
+/** Rough width of a 10 px Plex Mono character, for collision boxes. */
+const LABEL_CH_PX = 6.2;
+
+interface LabelEntry {
+  marker: MaplibreMarker;
+  el: HTMLElement;
+  lat: number;
+  lon: number;
+  dx: number;
+}
+
+/**
+ * Screen-space collision pass: labels keep their ideal offset when free and
+ * step above/below the point when another label already occupies that space.
+ * Earlier entries win, so waypoint tags have priority over airfields and places.
+ */
+function layoutLabels(map: MaplibreMap, entries: LabelEntry[]): void {
+  const boxes: { x0: number; y0: number; x1: number; y1: number }[] = [];
+  const width = map.getContainer().clientWidth;
+  const height = map.getContainer().clientHeight;
+  for (const e of entries) {
+    if (e.el.style.display === 'none') continue;
+    const p = map.project([e.lon, e.lat]);
+    // A label anchored outside the canvas would otherwise show a clipped strip
+    // of text at the edge; visibility keeps the element layable and reversible.
+    if (p.x < 0 || p.x > width || p.y < 0 || p.y > height) {
+      if (e.el.style.visibility !== 'hidden') e.el.style.visibility = 'hidden';
+      continue;
+    }
+    if (e.el.style.visibility === 'hidden') e.el.style.visibility = '';
+    const w = Math.max(18, (e.el.textContent?.length ?? 0) * LABEL_CH_PX + 4);
+    const h = 12;
+    let dy = 0;
+    for (let k = 0; k < 7; k++) {
+      const step = Math.ceil(k / 2) * (h + 2);
+      dy = k === 0 ? 0 : k % 2 === 1 ? step : -step;
+      const box = {
+        x0: p.x + e.dx,
+        x1: p.x + e.dx + w,
+        y0: p.y + dy - h / 2,
+        y1: p.y + dy + h / 2,
+      };
+      if (!boxes.some((b) => box.x0 < b.x1 && box.x1 > b.x0 && box.y0 < b.y1 && box.y1 > b.y0)) {
+        boxes.push(box);
+        break;
+      }
+    }
+    const cur = e.marker.getOffset();
+    if (cur.x !== e.dx || cur.y !== dy) e.marker.setOffset([e.dx, dy]);
+  }
+}
 
 const DEG = Math.PI / 180;
 const M_PER_DEG = 111320;
@@ -582,6 +635,26 @@ export default function MissionMap({
       const el = marker.getElement();
       if (showPlaces === (el.style.display === 'none')) el.style.display = showPlaces ? '' : 'none';
     }
+    const showAlt = zoom >= LABEL_ALT_MIN_ZOOM;
+    const labelEntries: LabelEntry[] = [];
+    for (const wp of d.waypoints) {
+      const marker = labelsRef.current.get(wp.id);
+      if (!marker) continue;
+      const el = marker.getElement();
+      const text = showAlt ? `${wp.name} ${fmtAltM(wp.altM)}` : wp.name;
+      if (el.textContent !== text) el.textContent = text;
+      labelEntries.push({ marker, el, lat: wp.lat, lon: wp.lon, dx: 9 });
+    }
+    for (const af of AIRFIELDS) {
+      const marker = afLabelsRef.current.get(af.icao);
+      if (marker) labelEntries.push({ marker, el: marker.getElement(), lat: af.lat, lon: af.lon, dx: 7 });
+    }
+    for (let i = 0; i < placeLabelsRef.current.length; i++) {
+      const p = PLACES[i];
+      const marker = placeLabelsRef.current[i];
+      if (p && marker) labelEntries.push({ marker, el: marker.getElement(), lat: p.lat, lon: p.lon, dx: 5 });
+    }
+    layoutLabels(map, labelEntries);
     const dl = divertLabelRef.current;
     if (dl) {
       const el = dl.getElement();
@@ -789,9 +862,10 @@ export default function MissionMap({
     const map = mapRef.current;
     if (!map) return;
     const visible = new Set<number>();
+    const showAlt = map.getZoom() >= LABEL_ALT_MIN_ZOOM;
     for (const wp of waypoints) {
       visible.add(wp.id);
-      const text = `${wp.name} ${fmtAltM(wp.altM)}`;
+      const text = showAlt ? `${wp.name} ${fmtAltM(wp.altM)}` : wp.name;
       let marker = labelsRef.current.get(wp.id);
       if (!marker) {
         const el = document.createElement('div');
@@ -891,39 +965,41 @@ export default function MissionMap({
 
   return (
     <div ref={containerRef} className={styles.wrap} style={{ height }} tabIndex={0}>
-      <div className={styles.hud}>
-        {basemapDown ? <span>MAP BASEMAP UNAVAILABLE - ROUTE DRAWN ON VECTOR FALLBACK</span> : null}
-        {cp && clampedClock !== null ? (
-          <span>{`T+${fmtClock(clampedClock)} - ${cp.kind.toUpperCase()} - LEG ${cp.legIndex + 1}/${legCount}`}</span>
-        ) : null}
-        {sel ? (
-          <span className={sel.id === selected ? styles.sel : undefined}>
-            {`SEL ${sel.name} ${fmtAltM(sel.altM)} - ${sel.lat.toFixed(4)} ${sel.lon.toFixed(4)}${
-              editable ? ' - DEL REMOVES' : ''
-            }`}
-          </span>
+      <div className={styles.topLeft}>
+        <div className={styles.hud}>
+          {basemapDown ? <span>MAP BASEMAP UNAVAILABLE - ROUTE DRAWN ON VECTOR FALLBACK</span> : null}
+          {cp && clampedClock !== null ? (
+            <span>{`T+${fmtClock(clampedClock)} - ${cp.kind.toUpperCase()} - LEG ${cp.legIndex + 1}/${legCount}`}</span>
+          ) : null}
+          {sel ? (
+            <span className={sel.id === selected ? styles.sel : undefined}>
+              {`SEL ${sel.name} ${fmtAltM(sel.altM)} - ${sel.lat.toFixed(4)} ${sel.lon.toFixed(4)}${
+                editable ? ' - DEL REMOVES' : ''
+              }`}
+            </span>
+          ) : null}
+        </div>
+        {nearest ? (
+          <div className={styles.navcard}>
+            <div className={styles.navHead}>
+              {`NEAREST ALTERNATE ${nearest.airfield.icao} ${nearest.airfield.city.toUpperCase()}`}
+            </div>
+            <div>{`BRG ${fmtBrg(nearest.bearingDeg)} - DIST ${fmtDistKm(nearest.distM)}`}</div>
+            <div>{`ETE ${fmtHms(nearest.eteS)} - ${nearest.mode} - ${nearest.verdict}`}</div>
+            {nearest.verdict === 'MARGINAL' || nearest.verdict === 'NOT REACHABLE' ? (
+              <div className={nearest.verdict === 'MARGINAL' ? styles.warn : styles.crit}>
+                {`LIMITING FACTOR ${nearest.limiting}`}
+              </div>
+            ) : null}
+            {nearest.verdict === 'NOT REACHABLE' && nav.reachable ? (
+              <div className={styles.ok}>
+                {`NEAREST REACHABLE ${nav.reachable.airfield.icao} ${nav.reachable.airfield.city.toUpperCase()} - ${fmtDistKm(nav.reachable.distM)} - ETE ${fmtHms(nav.reachable.eteS)}`}
+              </div>
+            ) : null}
+            {noneReachable ? <div className={styles.crit}>NO REACHABLE ALTERNATE</div> : null}
+          </div>
         ) : null}
       </div>
-      {nearest ? (
-        <div className={styles.navcard}>
-          <div className={styles.navHead}>
-            {`NEAREST ALTERNATE ${nearest.airfield.icao} ${nearest.airfield.city.toUpperCase()}`}
-          </div>
-          <div>{`BRG ${fmtBrg(nearest.bearingDeg)} - DIST ${fmtDistKm(nearest.distM)}`}</div>
-          <div>{`ETE ${fmtHms(nearest.eteS)} - ${nearest.mode} - ${nearest.verdict}`}</div>
-          {nearest.verdict === 'MARGINAL' || nearest.verdict === 'NOT REACHABLE' ? (
-            <div className={nearest.verdict === 'MARGINAL' ? styles.warn : styles.crit}>
-              {`LIMITING FACTOR ${nearest.limiting}`}
-            </div>
-          ) : null}
-          {nearest.verdict === 'NOT REACHABLE' && nav.reachable ? (
-            <div className={styles.ok}>
-              {`NEAREST REACHABLE ${nav.reachable.airfield.icao} ${nav.reachable.airfield.city.toUpperCase()} - ${fmtDistKm(nav.reachable.distM)} - ETE ${fmtHms(nav.reachable.eteS)}`}
-            </div>
-          ) : null}
-          {noneReachable ? <div className={styles.crit}>NO REACHABLE ALTERNATE</div> : null}
-        </div>
-      ) : null}
       {routeNotice ? (
         <div className={styles.toast} role="status">
           {routeNotice}

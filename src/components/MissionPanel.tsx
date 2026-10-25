@@ -225,7 +225,7 @@ export default function MissionPanel() {
       </Section>
 
       <Section title="Waypoints">
-        <div className="grid grid-cols-[1fr_54px_58px_58px_44px] items-center gap-x-2 gap-y-1 font-mono num">
+        <div className="grid grid-cols-[minmax(0,1fr)_48px_48px_48px_40px] items-center gap-x-1.5 gap-y-1 font-mono num">
           <span className="text-dim uppercase">Name / Pos</span>
           <span className="text-dim uppercase">Lat</span>
           <span className="text-dim uppercase">Lon</span>
@@ -234,22 +234,12 @@ export default function MissionPanel() {
           {waypoints.map((w) => (
             <Fragment key={w.id}>
               <span className="truncate uppercase">{w.name}</span>
-              <input
-                className="w-full font-mono num"
-                type="number"
-                step={0.0001}
-                value={w.lat}
-                readOnly
-                title="Drag on the map to edit position"
-              />
-              <input
-                className="w-full font-mono num"
-                type="number"
-                step={0.0001}
-                value={w.lon}
-                readOnly
-                title="Drag on the map to edit position"
-              />
+              <span className="truncate text-right" title={`${w.lat.toFixed(4)}`}>
+                {w.lat.toFixed(2)}
+              </span>
+              <span className="truncate text-right" title={`${w.lon.toFixed(4)}`}>
+                {w.lon.toFixed(2)}
+              </span>
               <NumberCell
                 value={w.altM}
                 min={0}
@@ -269,17 +259,13 @@ export default function MissionPanel() {
             </Fragment>
           ))}
         </div>
-        <div className="mt-1 flex items-center justify-between gap-2">
-          <span className="text-dim">
-            {routeEditMode
-              ? 'Waypoint edits are clamped to the preset region.'
-              : 'Enable EDIT ROUTE to change position, altitude or loiter.'}
-          </span>
-          <div className="flex gap-1">
+        {routeEditMode && (
+          <div className="mt-1 flex flex-wrap items-center gap-1">
+            <span className="text-dim uppercase">del</span>
             {waypoints.map((w) => (
               <button
                 key={`${w.id}-del`}
-                disabled={!routeEditMode || waypoints.length <= 2}
+                disabled={waypoints.length <= 2}
                 title={`Delete ${w.name}`}
                 onClick={() => deleteWaypoint(w.id)}
               >
@@ -287,6 +273,11 @@ export default function MissionPanel() {
               </button>
             ))}
           </div>
+        )}
+        <div className="mt-1 whitespace-nowrap text-dim">
+          {routeEditMode
+            ? 'Waypoint edits clamp to the preset region.'
+            : 'EDIT ROUTE enables position, altitude and loiter edits.'}
         </div>
       </Section>
 

@@ -5,16 +5,27 @@
   border-bottom: 1px solid #232a33;
 }
 
-.hud {
+/* Top-left overlay stack: HUD first, alternate card below it, so a wrapped HUD
+   can never sit under the card. */
+.topLeft {
   position: absolute;
   top: 0;
   left: 0;
-  right: 0;
   z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  max-width: calc(100% - 16px);
+  pointer-events: none;
+}
+
+.hud {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 14px;
   padding: 3px 8px;
+  max-width: 100%;
   font-family: 'IBM Plex Mono', monospace;
   font-size: 10px;
   line-height: 14px;
@@ -72,11 +83,7 @@
 
 /* --- alternate readout -------------------------------------------------- */
 .navcard {
-  position: absolute;
-  top: 22px;
-  left: 8px;
-  z-index: 2;
-  max-width: min(340px, 60%);
+  max-width: min(340px, 100%);
   padding: 4px 8px;
   font-family: 'IBM Plex Mono', monospace;
   font-size: 10px;
@@ -106,10 +113,12 @@
   color: #c4443f;
 }
 
+/* Sits on its own line above the attribution strip: at the narrow rail width
+   the note and the CARTO credit are wider than the canvas combined. */
 .note {
   position: absolute;
   left: 0;
-  bottom: 0;
+  bottom: 17px;
   z-index: 2;
   padding: 2px 6px;
   font-family: 'IBM Plex Mono', monospace;
@@ -122,14 +131,14 @@
   pointer-events: none;
 }
 
-/* Clamp warning: transient, above the attribution strip and clear of the
-   top-left navcard. */
+/* Clamp warning: transient, above the note and attribution strips, and clear
+   of the top-left navcard. */
 .toast {
   position: absolute;
   right: 8px;
-  bottom: 20px;
+  bottom: 38px;
   z-index: 3;
-  max-width: min(420px, 70%);
+  max-width: min(420px, calc(100% - 16px));
   padding: 3px 8px;
   font-family: 'IBM Plex Mono', monospace;
   font-size: 10px;

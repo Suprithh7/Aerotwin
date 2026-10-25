@@ -14,7 +14,7 @@ every run is reproducible from its seed.
 npm install
 npm run dev        # console at http://localhost:5173
 npm run build      # tsc + vite build
-npx vitest run     # 77 tests
+npx vitest run     # 91 tests
 ```
 
 ## Tabs
