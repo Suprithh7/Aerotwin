@@ -2,8 +2,7 @@
 // library and classify the engine state. Ground truth (the injected fault list)
 // is deliberately not read here - the diagnoser sees what the sensors see.
 import { CHANNELS } from '../sim/constants';
-import { CHT_LIMIT_C, OILP_MIN_BAR } from './rul';
-import { OILT_LIMIT_C } from '../mission/constants';
+import { CHT_LIMIT_C, OILP_MIN_BAR, OILT_LIMIT_C } from '../sim/limits';
 import {
   estimateRul,
   RUL_HISTORY_S,
@@ -119,10 +118,11 @@ export interface Fit {
  * Severity implied by a live residual, read off the candidate's own simulated
  * response curve at that fault's peak channel. The engine model is strongly
  * non-linear in severity - the cooling templates move the affected head by
- * +43 C at 0.3, +118 C at 0.6 and +374 C at 1.0 - so scaling the severity-1.0
- * template alone under-reads a mid-severity fault by more than half. The peak
- * channel is used rather than the whole-vector projection because the library
- * signatures of a cylinder fault are a single-channel spike.
+ * +2.9 C at 0.3, +20.6 C at 0.6 and +215 C at 1.0 - so scaling the
+ * severity-1.0 template alone under-reads a mid-severity fault by an order of
+ * magnitude. The peak channel is used rather than the whole-vector projection
+ * because the library signatures of a cylinder fault are a single-channel
+ * spike.
  */
 function severityFromCurve(sig: EngineSignature, z: number[]): number {
   const index = channelIndexOf(sig.peakChannel);

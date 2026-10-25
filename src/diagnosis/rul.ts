@@ -3,8 +3,8 @@
 // sensor-noise uncertainty of the end-of-life threshold, so the band does not
 // jitter between recomputes.
 import { CHANNELS } from '../sim/constants';
+import { CHT_LIMIT_C, OILP_MIN_BAR, OILT_LIMIT_C } from '../sim/limits';
 import { makeNormal, mulberry32 } from '../sim/rng';
-import { OILT_LIMIT_C } from '../mission/constants';
 import type { ChannelId } from '../sim/types';
 import type { SevTemplate } from './signatures';
 
@@ -21,8 +21,6 @@ export const RUL_CAP_S = 7200; // RUL reported above this is "beyond 2 h"
 export const RUL_CRITICAL_S = 600; // median below this => CRITICAL
 export const RUL_GRID_POINTS = 25;
 
-export const CHT_LIMIT_C = 230; // head over-temperature limit, any cylinder
-export const OILP_MIN_BAR = 2.5; // minimum usable oil pressure
 export const PWR_MIN_FRAC = 0.85; // minimum shaft power vs healthy phase demand
 
 export interface RulSample {
@@ -211,9 +209,11 @@ function crossing(fit: TrendFit, sevReq: number, xNow: number): number | null {
 /**
  * Severity at which one channel's simulated response reaches a physical limit,
  * interpolated over the severities the library sampled. The engine model is
- * strongly non-linear in severity - cyl-3 cooling moves CHT +41 C at 0.3,
- * +118 C at 0.6 and +790 C at 1.0 - so assuming proportionality through the
- * origin would place the 230 C limit at severity 0.29 instead of 0.44.
+ * strongly non-linear in severity - cyl-3 cooling moves CHT +2.9 C at 0.3,
+ * +20.6 C at 0.6 and +215 C at 1.0 from a ~103 C cruise baseline - because the
+ * head thermostat masks small losses before the fault dominates. Proportionality
+ * through the origin from the 0.3 sample would place the 135 C limit beyond
+ * severity 3, while the interpolated curve reaches it near 0.62.
  * Above the sampled range the last sampled slope is used (the steepest), which
  * is the conservative direction for a life projection.
  */

@@ -12,13 +12,13 @@ import {
 } from '../route';
 import { applyWeatherPreset, fetchLiveWeather, isaDevFromSurface, type WaypointWeather } from '../weather';
 import {
-  CHT_LIMIT_C,
   MISSION_AIRSPEED,
   MIN_GROUNDSPEED_MS,
   MISSION_FUEL_KG,
   MISSION_RESERVE_KG,
   gustExcessToTurbulence,
 } from '../constants';
+import { CHT_LIMIT_C } from '../../sim/limits';
 import { planMission, positionAtClock, requiredPowerKw, runMission } from '../mission';
 import { drawRunSet, runMonteCarlo } from '../monteCarlo';
 import { atmosphere } from '../../sim/atmosphere';

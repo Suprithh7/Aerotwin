@@ -66,11 +66,8 @@ export const MIN_GROUNDSPEED_MS = 10;
 export const MISSION_FUEL_KG = 95;
 export const MISSION_RESERVE_KG = 12;
 
-// Mission-level engine limits. CHT/oil-pressure values are shared with the
-// diagnosis layer's end-of-life thresholds.
-export const CHT_LIMIT_C = 230;
-export const OILT_LIMIT_C = 115;
-export const OILP_MIN_BAR = 2.5;
+// Vibration is a mission-layer monitoring limit; thermal and oil limits live
+// in src/sim/limits.ts so the sim, diagnosis and mission layers share one set.
 export const VIB_LIMIT_MM_S = 5.0;
 export const PWR_MARGIN_FRAC = 0.85; // minimum fraction of the healthy leg power
 

@@ -6,7 +6,8 @@ import {
   legRiskColor,
   useMissionStore,
 } from '../mission/missionStore';
-import { CHT_LIMIT_C, MC_MIN_RUNS, OILT_LIMIT_C } from '../mission/constants';
+import { MC_MIN_RUNS } from '../mission/constants';
+import { CHT_LIMIT_C, OILT_LIMIT_C } from '../sim/limits';
 import { TURB_LEVELS } from '../mission/weather';
 import type { TurbulenceLevel } from '../sim/types';
 import { AIRFIELDS } from '../data/airfields';

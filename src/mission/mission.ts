@@ -13,10 +13,10 @@ import {
   type EngineState,
 } from '../sim/engineModel';
 import { engineParamsWithFaults } from '../sim/faults';
+import { CHT_LIMIT_C, OILP_MIN_BAR, OILT_LIMIT_C } from '../sim/limits';
 import { makeNormal, mulberry32 } from '../sim/rng';
 import type { ActiveFaultInfo, EngineFaultKind, FaultSpec, Phase, Snapshot } from '../sim/types';
 import {
-  CHT_LIMIT_C,
   CEILING_DENSITY_ALT_M,
   CLIMB_RATE_MS,
   DESCENT_RATE_MS,
@@ -28,8 +28,6 @@ import {
   MISSION_POWER,
   MISSION_RESERVE_KG,
   MIN_GROUNDSPEED_MS,
-  OILT_LIMIT_C,
-  OILP_MIN_BAR,
   PWR_MARGIN_FRAC,
   TAKEOFF_S,
   VIB_LIMIT_MM_S,

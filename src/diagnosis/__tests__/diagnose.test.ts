@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Sim } from '../../sim/sim';
 import { buildSignatureLibrary, signaturesForPhase } from '../signatures';
 import { ANOMALY_MAG, CRIT_SEVERITY, Diagnoser, fitSignatures } from '../diagnose';
-import { CHT_LIMIT_C } from '../rul';
+import { CHT_LIMIT_C } from '../../sim/limits';
 import type { Diagnosis } from '../diagnose';
 
 const lib = buildSignatureLibrary();
@@ -53,18 +53,20 @@ describe('diagnosis classification', () => {
   });
 
   it('names a cooling loss and scales the state with severity', () => {
-    // 200 s of steady fault so the severity history window is settled.
-    const severe = run({ phase: 'cruise', altitude: 3000, isaDev: 0 }, { kind: 'cooling', cylinder: 3, severity: 0.7, rampTime: 10 }, 60, 200);
+    // 200 s of steady fault so the severity history window is settled. The
+    // thermostatic radiator compensates a small cooling loss, so the detection
+    // floor for this fault is about 0.55; the cases below sit above it.
+    const severe = run({ phase: 'cruise', altitude: 3000, isaDev: 0 }, { kind: 'cooling', cylinder: 3, severity: 0.8, rampTime: 10 }, 60, 200);
     expect(severe.d.state).toBe('CRITICAL');
     expect(severe.d.dominant?.kind).toBe('cooling');
     expect(severe.d.dominant?.cylinder).toBe(3);
     expect(severe.d.severity).toBeGreaterThanOrEqual(CRIT_SEVERITY - 0.05);
-    expect(Math.abs(severe.d.severity - 0.7)).toBeLessThan(0.15);
+    expect(Math.abs(severe.d.severity - 0.8)).toBeLessThan(0.15);
 
-    const mild = run({ phase: 'cruise', altitude: 3000, isaDev: 0 }, { kind: 'cooling', cylinder: 3, severity: 0.35, rampTime: 10 }, 60, 200);
+    const mild = run({ phase: 'cruise', altitude: 3000, isaDev: 0 }, { kind: 'cooling', cylinder: 3, severity: 0.6, rampTime: 10 }, 60, 200);
     expect(mild.d.state).toBe('WARNING');
     expect(mild.d.dominant?.kind).toBe('cooling');
-    expect(Math.abs(mild.d.severity - 0.35)).toBeLessThan(0.15);
+    expect(Math.abs(mild.d.severity - 0.6)).toBeLessThan(0.15);
   });
 
   it('returns to NOMINAL when the fault is cleared', () => {
@@ -93,7 +95,7 @@ describe('diagnosis classification', () => {
     // Growth slow enough to stay below the CHT limit inside the projection window.
     const { d } = run(
       { phase: 'cruise', altitude: 3000, isaDev: 0 },
-      { kind: 'cooling', cylinder: 3, severity: 0.3, rampTime: 300 },
+      { kind: 'cooling', cylinder: 3, severity: 0.55, rampTime: 300 },
       30,
       330,
     );
@@ -155,7 +157,7 @@ describe('LIMIT vs FAULT alerts', () => {
     const { sim, snap } = nominalSnap();
     const sig = signaturesForPhase(lib, 'cruise').find((s) => s.kind === 'cooling' && s.cylinder === 3)!;
     // A mid-severity fault residual (below CRIT_SEVERITY) plus a hard limit.
-    const z = sig.sev1.map((v) => v * 0.35);
+    const z = sig.sev1.map((v) => v * 0.2);
     snap.readings.cht3.measured = CHT_LIMIT_C + 10;
     const d = new Diagnoser(lib).update(z, sim.twinVector(), snap, true);
 

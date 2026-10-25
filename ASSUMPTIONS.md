@@ -41,12 +41,18 @@ lapse rate). Density altitude inverts the standard density law.
 | `compHeatBase` | 22 | K | compressor outlet rise over OAT at zero boost |
 | `compHeatPerPR` | 70 | K | additional intake temperature rise per unit PR |
 | `mapThrFloor` | 0.25 | – | manifold pressure fraction of boost pressure at idle throttle |
-| `hCylBase` | 55 | W/K | static cylinder cooling coefficient |
-| `hCylPerMs` | 0.72 | W/(K·m/s) | cooling gain with airspeed |
+| `hCylBase` | 55 | W/K | static cylinder cooling coefficient (passive path) |
+| `hCylPerMs` | 0.72 | W/(K·m/s) | passive cooling gain with airspeed |
 | `cylRadiate` | 8 | W/K | lumped radiation loss per cylinder |
-| `hOilBase` | 40 | W/K | oil cooler coefficient at zero airspeed |
-| `hOilPerMs` | 0.5 | W/(K·m/s) | oil cooling gain with airspeed |
+| `hCylThermoMax` | 135 | W/K | extra head cooling at full thermostat opening |
+| `tStatOpenC` | 100 | °C | head thermostat cracking temperature |
+| `tStatSpanC` | 10 | K | cracking to full-opening span |
+| `hOilBase` | 25 | W/K | oil-cooler coefficient at zero airspeed |
+| `hOilPerMs` | 0.35 | W/(K·m/s) | oil-cooling gain with airspeed |
 | `cylToOilCond` | 8 | W/K | block-to-oil conduction per cylinder |
+| `hOilThermoMax` | 70 | W/K | extra oil-cooler conductance at full opening |
+| `oilStatOpenC` | 90 | °C | oil thermostat cracking temperature |
+| `oilStatSpanC` | 10 | K | cracking to full-opening span |
 | `oilFrictPowerFrac` | 0.08 | – | friction heat as fraction of shaft power |
 | `oilFrictRpmK` | 55 | W/(krpm)³ | speed-dependent friction heat |
 | `oilPRef` | 4.3 | bar | oil pressure at 2000 rpm, 80 °C, healthy seals |
@@ -58,20 +64,126 @@ lapse rate). Density altitude inverts the standard density law.
 | `vibIgnK` | 2.5 | mm/s | added vibration at full ignition degradation |
 | `govKp` | 3e-4 | 1/(rpm·s) | electronic-governor integral gain |
 | `govClamp` | 0.3 | – | governor authority around the schedule throttle |
-| unburnt→exh 0.25 | hard-coded in `engineModel.ts:153` | – | fraction of misfire fuel energy released in the exhaust manifold |
-| late-burn→exh 0.5 | `engineModel.ts:151` | – | fraction of retarded-combustion energy dumped into the exhaust |
-| friction-to-head 0.02 | `engineModel.ts:172` | – | shaft-power share heating each cylinder head |
-| egt quench 0.55/ inj excess | `engineModel.ts:185` | – | EGT reduction per unit of over-fuelling |
-| vib lag 0.4 | `engineModel.ts:213` | s | vibration RMS EWMA time constant |
-| eta compression split 0.55+0.45·comp | `engineModel.ts:141` | – | efficiency share vs charge density under compression loss |
-| back-pressure penalties 0.22 (VE, `:132`) / 0.28 (eta, `:142`) / 0.18 (MAP, `:119`) | `engineModel.ts` | – | efficiency/flow losses at full exhaust fault |
+| unburnt→exh 0.25 | hard-coded in `engineModel.ts:178` | – | fraction of misfire fuel energy released in the exhaust manifold |
+| late-burn→exh 0.5 | `engineModel.ts:172` | – | fraction of retarded-combustion energy dumped into the exhaust |
+| friction-to-head 0.02 | `engineModel.ts:199` | – | shaft-power share heating each cylinder head |
+| egt quench 0.55/ inj excess | `engineModel.ts:215` | – | EGT reduction per unit of over-fuelling |
+| vib lag 0.4 | `engineModel.ts:102` | s | vibration RMS EWMA time constant |
+| eta compression split 0.55+0.45·comp | `engineModel.ts:163` | – | efficiency share vs charge density under compression loss |
+| back-pressure penalties 0.22 (VE, `:154`) / 0.28 (eta, `:164`) / 0.18 (MAP, `:144`) | `engineModel.ts` | – | efficiency/flow losses at full exhaust fault |
+
+## Reference engine and operating limits — `src/sim/limits.ts`
+The single reference class is a **turbocharged boxer-4 of roughly 100 hp,
+Rotax 914-like**, with liquid-cooled cylinder heads. The limits are taken from
+the public operator's manual and type certificate, not invented:
+
+| Constant | Value | Unit | Source |
+|---|---|---|---|
+| `CHT_LIMIT_C` | 135 | °C | Rotax 914 Operator's Manual, coolant temperature max; applied here to the lumped head temperature |
+| `OILT_LIMIT_C` | 130 | °C | Rotax 914 Operator's Manual, oil temperature max |
+| `OILP_MIN_BAR` | 0.8 | bar | Rotax 914 Operator's Manual, minimum below 3500 rpm |
+| `CHT_CAUTION_C` | 120 | °C | display band only (not a limit); set below the 135 °C limit |
+| `OILT_CAUTION_C` | 110 | °C | display band only; top of the normal oil range |
+
+Sources:
+- BRP-Rotax **914 Operator's Manual, Edition 3** —
+  `https://aeloswissacademy.com/documents/sonaca/OM_914_Series_ED3.pdf`
+  (coolant temperature max 135 °C; oil temperature max 130 °C, normal
+  90-110 °C, minimum 50 °C; oil pressure normal 2.0-5.0 bar above 3500 rpm,
+  minimum 0.8 bar below 3500 rpm, maximum 7.0 bar).
+- EASA **TCDS E.122, issue 06** —
+  `https://www.flyrotax.com/assets/files/Certificates/TC-TCDS-EASA.E.122-914.pdf`
+  (certified 914 series limits and ratings).
+
+Two mappings are assumptions in their own right. First, the manual's 135 °C is
+a **coolant** temperature; the model's `cht` state is a lumped cylinder-head
+metal temperature, and the limit is applied to that state unchanged. Second,
+the model's rpm is **propeller** rpm (1800-2400), so the "below 3500 rpm"
+minimum oil pressure (0.8 bar) is the applicable row; the model's 7.0 bar
+pressure clamp matches the manual's maximum. The mission layer's 5.0 mm/s
+vibration limit and 0.85 power margin are prototype monitoring assumptions, not
+Rotax limits.
+
+## Thermal / oil calibration — `src/sim/constants.ts`, `src/sim/engineModel.ts`
+The calibration target is: a healthy engine at ISA, in cruise at 3000-4000 m
+and in takeoff at sea level to 500 m, stays inside the limits above. The model
+now has **thermostatic radiators** in both cooling circuits:
+
+- head: `h = (hCylBase + hCylPerMs·v + hCylThermoMax·open_cht) · cooling[i]`,
+  where `open_cht = clamp((cht − 100)/10, 0, 1)`. The multiplier `cooling[i]`
+  lets a cooling fault degrade the thermostat's capacity as well as the passive
+  path.
+- oil: `h = hOilBase + hOilPerMs·v + hOilThermoMax·open_oil`,
+  `open_oil = clamp((oilT − 90)/10, 0, 1)`.
+
+The thermostat is not cosmetic. At takeoff the engine rejects roughly 1.7× the
+cruise waste heat at a *lower* airspeed, so no single constant conductance can
+hold takeoff below 135 °C without overcooling cruise and loiter. With the
+thermostat, the head runs at ~103 °C in cruise (inside the Rotax normal band)
+and opens only for high-power, low-airspeed operation.
+
+Settled healthy operating points after recalibration (no turbulence, ISA,
+noise-free warm state):
+
+| Condition | CHT (max) | Oil temp | Oil pressure | Shaft power |
+|---|---|---|---|---|
+| cruise, 3000 m | 103.3 °C | 90.7 °C | 3.9 bar | 44.7 kW |
+| cruise, 1000 m, ISA +20 | 107.3 °C | 93.6 °C | 3.8 bar | 44.7 kW |
+| loiter, 4000 m | 89.0 °C | 62.7 °C | 4.9 bar | 24.8 kW |
+| takeoff, sea level | 130.7 °C | 97.3 °C | 4.1 bar | 74.6 kW |
+| takeoff, 500 m | 127.5 °C | 96.9 °C | 4.1 bar | 74.6 kW |
+
+The takeoff schedule was also brought onto the reference class: `throttle`
+0.65 (was 1.0) and `airspeedMs` 25 (was 12). At full throttle the governor
+saturated at its authority limit and the engine settled at 106.7 kW (143 hp)
+and 2700 rpm; at 0.65 the governor holds 2400 rpm and the propeller load fixes
+74.6 kW (100 hp), so the thermal calibration is being demonstrated at the
+class rating rather than above it. On a **hot day** the absolute CHT rises with
+ambient and a sea-level takeoff at ISA +20 will exceed 135 °C; the calibration
+envelope is ISA standard conditions, consistent with the mission layer's
+practice of exempting the short takeoff transient from thermal limit checks.
+
+### Constant review — thermal and oil
+| Constant | Before → After | Rationale |
+|---|---|---|
+| `chtHeatFrac` | 0.54 → 0.54 | heat split among head/exhaust/overboard; not a measured coefficient |
+| `exhHeatFrac`, `radFrac` | 0.30, 0.05 → unchanged | keep the energy split summing to 0.89 with the residual to oil/losses |
+| `bpExhHeatFrac`, `bpCylHeatFrac` | 0.15, 0.22 → unchanged | fault-path coefficients, not active in the healthy calibration |
+| `cpExhaust` | 1160 → unchanged | typical exhaust-gas cp |
+| `chtCapJk` | 1400 → unchanged | lumped head wall: ~1.5 kg aluminium at ~900 J/(kg·K); the full head+block mass would give a much slower response than the observed CHT lag |
+| `oilCapJk` | 5200 → unchanged | ~3 L of oil at ~2000 J/(kg·K) plus sump metal |
+| `hCylBase`, `hCylPerMs` | 55, 0.72 → unchanged | passive/convective path; with the thermostat these place cruise just above the 100 °C crack |
+| `hCylThermoMax` | new 135 W/K | sized so sea-level, ISA takeoff tops out at 130.7 °C with the thermostat fully open |
+| `tStatOpenC`, `tStatSpanC` | new 100 °C, 10 K | holds cruise at ~103 °C, inside the Rotax 90-110 °C normal band |
+| `hOilBase`, `hOilPerMs` | 40, 0.5 → 25, 0.35 | the old values held cruise oil at 67 °C, below the Rotax normal band; the new values hold ~91 °C |
+| `hOilThermoMax` | new 70 W/K | holds takeoff oil at ~97 °C; without it the old model settled at 264 °C |
+| `oilStatOpenC`, `oilStatSpanC` | new 90 °C, 10 K | oil thermostat cracks at the bottom of the normal band |
+| `cylToOilCond` | 8 → unchanged | keeps a small, physically sensible oil response to head temperature |
+| `oilFrictPowerFrac`, `oilFrictRpmK` | 0.08, 55 → unchanged | ~9 % of shaft power as oil heat (4.1 kW at cruise), consistent with the observed oil warm-up |
+| `oilPRef`, `oilVisicPerK` | 4.3 bar, 0.013/K → unchanged | 4.3 bar at 2000 rpm/80 °C sits mid-band (2-5 bar); at 130 °C pressure still reads ~2.3 bar, above the 0.8 bar floor |
+
+A cooling fault is compensated by the thermostat until the faulted capacity
+falls below the healthy demand. In this calibration that is at about **0.5
+severity**: the steady CHT rise is only ~3 °C at severity 0.3 but ~21 °C at
+0.6 and ~43 °C at 0.7. The classifier therefore has a detection floor near
+0.55 severity for this fault; the signature library and diagnosis tests use
+0.55-0.8, and this floor is a documented consequence of thermostatic control,
+not a classifier bug. Oil-seal degradation is likewise partly compensated by
+the oil thermostat (oil temperature rises ~4 °C at severity 0.7); its oil
+pressure collapse and vibration rise remain the dominant signature.
 
 ## Flight phases — `src/sim/constants.ts` (`PHASES`)
 RPM target, schedule throttle, airspeed, propeller load constant
 (N·m/(rad/s)²) and command AFR per phase — all assumed:
-takeoff 2400 rpm/1.0/12 m/s/4.7e-3/AFR 12.8; climb 2300/0.88/27/4.3e-3/13.6;
+takeoff 2400 rpm/0.65/25 m/s/4.7e-3/AFR 12.8; climb 2300/0.88/27/4.3e-3/13.6;
 cruise 2100/0.72/41/4.2e-3/16.5; loiter 1800/0.5/26/3.7e-3/17.0;
 descent 1650/0.32/32/2.9e-3/17.5.
+
+The takeoff throttle is deliberately inside the governor authority
+(`base ± 0.3`) so the governor, not saturation, holds 2400 rpm. The resulting
+propeller load fixes 74.6 kW (100 hp), the reference-class continuous rating.
+This live schedule is deliberately separate from the mission power schedule
+below, which is a planning cap.
 
 ## Fault strength coefficients — `src/sim/faults.ts:30-52`
 Each engine fault scales a model parameter by `severity × rampProgress`
@@ -122,9 +234,19 @@ UI tick 10 Hz, worker catch-up cap 240 steps/frame (`worker.ts:65`).
 
 ## Documented cross-channel effects
 - Cooling degradation (cyl): raises that cylinder's CHT; other CHTs, EGT,
-  power stay within noise. Oil temp rises slightly (~2–4 °C) because hot
+  power stay within noise. Oil temp rises slightly (~2-4 °C) because hot
   block-to-oil conduction (`cylToOilCond`) transfers part of the extra head
-  heat to the sump — expected physics, visible as a small positive residual.
+  heat to the sump; the oil thermostat absorbs most of that extra heat.
+- Thermostatic compensation sets the cooling-fault detection floor. A partial
+  cooling loss raises CHT only once the radiator's faulted capacity is below
+  the healthy demand; in this calibration the first ~0.5 severity is
+  compensated (steady CHT rise ~3 °C at 0.3, ~21 °C at 0.6, ~43 °C at 0.7).
+  The classifier is therefore specified over 0.55-0.8 severity, and the
+  library's 0.3 template is retained only as the low end of the response curve,
+  not as a detection claim.
+- Oil-seal degradation: the oil thermostat also compensates part of the extra
+  friction heat, so oil temperature rises only ~4 °C at severity 0.7 while oil
+  pressure collapses and vibration rises; those channels carry the signature.
 - Governor coupling: faults that cut power (misfire, turbo, compression,
   exhaust) make the electronic governor open the throttle to hold the phase
   rpm target, so MAP/boost/fuel residuals move opposite to raw power loss;
@@ -136,8 +258,9 @@ UI tick 10 Hz, worker catch-up cap 240 steps/frame (`worker.ts:65`).
 
 # AeroTwin M3 — Mission Risk assumptions
 
-The mission layer reuses the M1 engine model unchanged. Everything below is a
-planning or profile assumption, not a change to the physics.
+The mission layer reuses the M1 engine model; the recalibrated thermostatic
+cooling above applies unchanged to both the live and headless runs. Everything
+below is a planning or profile assumption, not a second physics model.
 
 ## Route geometry — `src/mission/route.ts`
 | Item | Value | Units | Location |
@@ -208,12 +331,15 @@ load by the local density ratio: `P = propC · σ · (rpm·π/30)³`.
 
 Two schedule constraints are assumptions in their own right:
 
-- The loads are capped at the power this model's cooling envelope sustains at
-  field elevation (~55 kW peak), not at the 75 kW class rating. Raising them
-  makes every mission breach CHT regardless of weather, which would leave the
-  risk model nothing to discriminate on.
+- The loads are capped at about 55 kW peak, roughly 75 % of the 75 kW class
+  rating, rather than at the live sim's 74.6 kW reference takeoff power. The
+  cap is a **planning** choice: it keeps every preset flyable with thermal
+  margin so weather and degradation, not raw rated power, produce the risk
+  separation the Monte Carlo is meant to show. The recalibrated cooling model
+  can sustain more at field elevation; the mission schedule was left unchanged
+  to preserve the M3 comparison basis.
 - `throttleBase` must keep the row inside the governor authority
-  (`govClamp` = ±0.3, `sim/constants.ts:53`): a segment is only controllable if
+  (`govClamp` = ±0.3, `sim/constants.ts:62`): a segment is only controllable if
   the throttle that holds its rpm target lies within `base ± 0.3`, so the base
   is centred on the sea-level requirement and the rows hold from sea level to
   ~6 km. AFR is paired with the throttle band its load needs.
@@ -227,18 +353,23 @@ the documented response to the runtime target: at 0.25 s, 200 runs take
 **3.7 s wall on 4 workers** (measured in-app, seed 1337, HIGH ALTITUDE preset),
 so no further reduction was needed.
 
-## Mission limits — `src/mission/constants.ts:71-75`
-| Limit | Value | Units | Notes |
-|---|---|---|---|
-| `CHT_LIMIT_C` | 230 | °C | shared with the diagnosis layer |
-| `OILT_LIMIT_C` | 115 | °C | |
-| `OILP_MIN_BAR` | 2.5 | bar | |
-| `VIB_LIMIT_MM_S` | 5.0 | mm/s | |
-| `PWR_MARGIN_FRAC` | 0.85 | – | mean delivered power must reach 85 % of the required leg power (`mission.ts:553`) |
-| `CEILING_DENSITY_ALT_M` | 6300 | m DA | see below |
+## Mission limits — `src/sim/limits.ts`, `src/mission/constants.ts`
+| Limit | Value | Units | Location | Notes |
+|---|---|---|---|---|
+| `CHT_LIMIT_C` | 135 | °C | `sim/limits.ts:5` | shared with the diagnosis layer |
+| `OILT_LIMIT_C` | 130 | °C | `sim/limits.ts:6` | |
+| `OILP_MIN_BAR` | 0.8 | bar | `sim/limits.ts:7` | |
+| `VIB_LIMIT_MM_S` | 5.0 | mm/s | `mission/constants.ts:71` | mission-layer monitoring limit |
+| `PWR_MARGIN_FRAC` | 0.85 | – | `mission/constants.ts:72` | mean delivered power must reach 85 % of the required leg power (`mission.ts:551`) |
+| `CEILING_DENSITY_ALT_M` | 6300 | m DA | `mission/constants.ts:81` | see below |
+
+The thermal and oil limits live in `src/sim/limits.ts` so the simulation,
+diagnosis and mission layers share one set; the mission layer keeps only its
+own vibration and planning limits. Sources are listed in "Reference engine and
+operating limits" above.
 
 Thermal limits (CHT, oil temp) are exempt during takeoff and landing, the two
-short transients at high power (`mission.ts:627-633`); oil pressure, vibration
+short transients at high power (`mission.ts:627-631`); oil pressure, vibration
 and the ceiling still apply.
 
 Service ceiling is expressed as the highest density altitude at which the
@@ -493,8 +624,9 @@ scenario panel (`ScenarioPanel.tsx:88-107`) writes the sim state through
 healthy twin with the true engine so a re-load never reads as a residual.
 
 ## Physical model — findings, not changes
-No physics was modified for M3. Two observations from wiring the mission layer
-to the untouched model:
+No physics was modified for M3; the thermal/oil recalibration described above
+belongs to M1 and applies identically to the live and headless runs. Two
+observations from wiring the mission layer to the unchanged model:
 - Cooling improves with thin, cold air at altitude, so a hot day at high
   altitude shows up mainly as lost margin, not as a thermal breach; the
   ceiling rule above is what encodes the real operational cost.

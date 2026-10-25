@@ -192,12 +192,13 @@ function integrate(s: EngineState, out: EngineDerived, p: EngineParams, inp: Eng
   const hBase = ENG.hCylBase + ENG.hCylPerMs * inp.airspeedMs;
   let meanChT = 0;
   for (let i = 0; i < N_CYL; i++) {
+    const statOpen = clamp((s.cht[i] - ENG.tStatOpenC) / ENG.tStatSpanC, 0, 1);
     const qIn =
       (ENG.chtHeatFrac + ENG.radFrac) * scWaste[i] +
       ENG.bpCylHeatFrac * p.exhaust * scFuel[i] * ENG.lhvJkg +
       0.02 * (shaftW / N_CYL); // friction share
     const qOut =
-      hBase * p.cooling[i] * (s.cht[i] - a.tempC) +
+      (hBase + ENG.hCylThermoMax * statOpen) * p.cooling[i] * (s.cht[i] - a.tempC) +
       ENG.cylRadiate * (s.cht[i] - a.tempC) +
       ENG.cylToOilCond * (s.cht[i] - s.oilTemp);
     s.cht[i] += ((qIn - qOut) / ENG.chtCapJk) * dt;
@@ -220,7 +221,9 @@ function integrate(s: EngineState, out: EngineDerived, p: EngineParams, inp: Eng
   const fricW =
     ENG.oilFrictPowerFrac * shaftW * (1 + 1.6 * (1 - p.oilSeal)) +
     ENG.oilFrictRpmK * Math.pow(s.rpm / 1000, 3);
-  const hOil = ENG.hOilBase + ENG.hOilPerMs * inp.airspeedMs;
+  const oilStatOpen = clamp((s.oilTemp - ENG.oilStatOpenC) / ENG.oilStatSpanC, 0, 1);
+  const hOil =
+    ENG.hOilBase + ENG.hOilPerMs * inp.airspeedMs + ENG.hOilThermoMax * oilStatOpen;
   const qOil = fricW + ENG.cylToOilCond * (meanChT - s.oilTemp);
   s.oilTemp += ((qOil - hOil * (s.oilTemp - a.tempC)) / ENG.oilCapJk) * dt;
   const visc = Math.exp(-ENG.oilVisicPerK * (s.oilTemp - 80));

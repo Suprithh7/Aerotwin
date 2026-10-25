@@ -34,9 +34,18 @@ export const ENG = {
   hCylBase: 55, // W/K, static cylinder cooling coefficient
   hCylPerMs: 0.72, // W/K per m/s of airspeed
   cylRadiate: 8, // W/K lumped radiation loss per cylinder
-  hOilBase: 40, // W/K, oil cooler coefficient at zero airspeed
-  hOilPerMs: 0.5, // W/K per m/s
+  hOilBase: 25, // W/K, oil cooler coefficient at zero airspeed
+  hOilPerMs: 0.35, // W/K per m/s
   cylToOilCond: 8, // W/K cylinder-block-to-oil conduction
+  // thermostatic radiators: extra conductance that opens above a cracking
+  // temperature. Without them a constant conductance cannot hold rated-power
+  // takeoff at sea level and cruise at altitude inside the same 135 C limit.
+  hCylThermoMax: 135, // W/K, extra head cooling at full thermostat opening
+  tStatOpenC: 100, // C, head thermostat cracking temperature
+  tStatSpanC: 10, // K, cracking to full opening
+  hOilThermoMax: 70, // W/K, extra oil-cooler conductance at full opening
+  oilStatOpenC: 90, // C, oil thermostat cracking temperature
+  oilStatSpanC: 10, // K, cracking to full opening
   // friction & oil
   oilFrictPowerFrac: 0.08, // friction heat as fraction of shaft power
   oilFrictRpmK: 55, // W per (krpm)^3 speed-dependent friction
@@ -64,7 +73,7 @@ export const PHASES: Record<
     afr: number;
   }
 > = {
-  takeoff: { rpmTarget: 2400, throttle: 1.0, airspeedMs: 12, propC: 4.7e-3, afr: 12.8 },
+  takeoff: { rpmTarget: 2400, throttle: 0.65, airspeedMs: 25, propC: 4.7e-3, afr: 12.8 },
   climb: { rpmTarget: 2300, throttle: 0.88, airspeedMs: 27, propC: 4.3e-3, afr: 13.6 },
   cruise: { rpmTarget: 2100, throttle: 0.72, airspeedMs: 41, propC: 4.2e-3, afr: 16.5 },
   loiter: { rpmTarget: 1800, throttle: 0.5, airspeedMs: 26, propC: 3.7e-3, afr: 17.0 },
