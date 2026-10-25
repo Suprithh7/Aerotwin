@@ -312,6 +312,7 @@ describe('monte carlo', () => {
       weather: weatherFor(SHORT_ROUTE.length),
       items: [],
       initState: null,
+      fuelLoadKg: MISSION_FUEL_KG,
       runs: 200,
       seed: 4242,
       growthPerH: null,
@@ -337,6 +338,7 @@ describe('monte carlo', () => {
       weather: weatherFor(SHORT_ROUTE.length, 12, 8, 215, 'severe'),
       items: [],
       initState: null,
+      fuelLoadKg: MISSION_FUEL_KG,
       seed: 11,
       growthPerH: null,
     };
@@ -428,6 +430,7 @@ describe('acceptance separation', () => {
       weather: wx,
       items: [{ kind: 'cooling', cylinder: 1, severity: 0.6 }],
       initState: hot,
+      fuelLoadKg: MISSION_FUEL_KG,
       seed: 11,
       growthPerH: 0,
     });

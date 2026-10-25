@@ -14,7 +14,7 @@ import type {
   SiteType,
   ZoneType,
 } from './types';
-import { ALT_REFS, NODE_TYPES, SITE_TYPES, ZONE_TYPES } from './types';
+import { ALT_REFS, NODE_TYPES, SITE_TYPES, ZONE_TYPES, clampFuelLoadKg } from './types';
 
 export interface MissionFeatureCollection extends FeatureCollection {
   /** Complete mission, so a round-trip preserves ids and all metadata. */
@@ -217,11 +217,12 @@ export function missionFromGeoJson(text: string): { mission: Mission | null; err
       } satisfies LandingSite;
     });
   const routeProps = (line.properties ?? {}) as Record<string, unknown>;
+  const engineProfileId =
+    typeof routeProps.engineProfileId === 'string' ? routeProps.engineProfileId : 'nominal';
   const mission: Mission = {
     id: `import-${Date.now().toString(36)}`,
     name: typeof routeProps.name === 'string' && routeProps.name ? routeProps.name : 'IMPORTED MISSION',
-    engineProfileId:
-      typeof routeProps.engineProfileId === 'string' ? routeProps.engineProfileId : 'nominal',
+    engineProfileId,
     startTimeUTC:
       typeof routeProps.startTimeUTC === 'string'
         ? routeProps.startTimeUTC
@@ -230,6 +231,7 @@ export function missionFromGeoJson(text: string): { mission: Mission | null; err
     zones,
     groundStation,
     customSites,
+    fuelLoadKg: clampFuelLoadKg(routeProps.fuelLoadKg, engineProfileId),
     weatherMode: 'forecast',
     illustrative: true,
   };
@@ -239,6 +241,7 @@ export function missionFromGeoJson(text: string): { mission: Mission | null; err
 function normalizeMission(m: Mission): Mission {
   return {
     ...m,
+    fuelLoadKg: clampFuelLoadKg(m.fuelLoadKg, m.engineProfileId),
     nodes: m.nodes.map((n) => ({
       ...n,
       id: Math.round(n.id),

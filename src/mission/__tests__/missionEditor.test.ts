@@ -16,6 +16,7 @@ import {
   zoneCrossings,
 } from '../geometry';
 import { buildPreflight } from '../preflight';
+import { MISSION_FUEL_KG, MISSION_RESERVE_KG } from '../constants';
 import { distanceM, type Waypoint } from '../route';
 import { missionFromGeoJson } from '../geoJson';
 import { mergeTerrain, resolveWaypoints, terrainKey } from '../terrain';
@@ -122,6 +123,33 @@ describe('mission geometry', () => {
     expect(offset).toBeLessThan(120);
     expect(orbitRadiusM(35, 20)).toBeCloseTo(343, 0);
     expect(orbitRadiusM(35, 20)).toBeGreaterThan(orbitRadiusM(25, 20));
+  });
+});
+
+describe('mission fuel load', () => {
+  it('defaults a loaded template to the engine profile capacity', () => {
+    expect(store().mission.fuelLoadKg).toBe(MISSION_FUEL_KG);
+  });
+
+  it('drives the pre-flight fuel check from the mission load', () => {
+    const wps = resolveWaypoints(store().mission);
+    const wx = weatherFor(wps.length);
+    store().setFuelLoadKg(60);
+    const report = buildPreflight(store().mission, wps, wx);
+    expect(report.fuel?.loadKg).toBe(60);
+    expect(report.fuel?.capacityKg).toBe(MISSION_FUEL_KG);
+    expect(report.fuel?.marginKg).toBeCloseTo(
+      60 - (report.fuel?.burnKg ?? 0) - MISSION_RESERVE_KG,
+      6,
+    );
+    expect(report.checks.find((c) => c.id === 'fuel')!.sentence).toContain('Loaded 60 kg');
+  });
+
+  it('clamps the loaded fuel to the tank capacity', () => {
+    store().setFuelLoadKg(500);
+    expect(store().mission.fuelLoadKg).toBe(MISSION_FUEL_KG);
+    store().setFuelLoadKg(-5);
+    expect(store().mission.fuelLoadKg).toBe(0);
   });
 });
 

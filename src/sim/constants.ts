@@ -99,7 +99,8 @@ export const TURB: Record<TurbulenceLevel, { factor: number; tauS: number }> = {
 // Gust impact amplitudes: load x, throttle x, rpm-target jitter (rpm)
 export const GUST = { load: 0.14, throttle: 0.035, rpm: 18 };
 
-export const INITIAL_FUEL_KG = 42; // demo mission fuel load
+/** Airframe tank capacity; the mission fuel load is set per mission. */
+export const FUEL_CAPACITY_KG = 95;
 
 export const CHANNELS: ChannelMeta[] = [
   { id: 'rpm', label: 'RPM', unit: 'rpm', noiseSigma: 11, driftRange: 260 },

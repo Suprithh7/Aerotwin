@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { ChannelId, FaultSpec, HistPoint, Scenario, Snapshot } from '../sim/types';
 import type { WorkerCommand, WorkerMessage } from '../sim/worker';
-import { DEFAULT_SCENARIO, HIST_WINDOW_S, INITIAL_FUEL_KG } from '../sim/constants';
+import { DEFAULT_SCENARIO, FUEL_CAPACITY_KG, HIST_WINDOW_S } from '../sim/constants';
 import { NO_DIAGNOSIS, type Diagnosis } from '../diagnosis/diagnose';
 import { FF_SMOOTH_WINDOW_S } from '../nav/alternates';
 
@@ -24,7 +24,7 @@ export interface SimStore {
   togglePause: () => void;
   stepFrame: () => void;
   applySeed: () => void;
-  setScenario: (s: Scenario) => void;
+  setScenario: (s: Scenario, fuelKg?: number) => void;
   setFuelLoad: (kg: number) => void;
   setSelectedChannel: (c: ChannelId) => void;
   injectFault: (spec: FaultInput) => void;
@@ -84,7 +84,7 @@ export const useSimStore = create<SimStore>((set, get) => {
     simEpoch: 0,
     seedInput: '1337',
     scenario: DEFAULT_SCENARIO,
-    fuelLoadKg: INITIAL_FUEL_KG,
+    fuelLoadKg: FUEL_CAPACITY_KG,
     selectedChannel: 'cht3',
     setSpeed: (v) => {
       set({ speed: v });
@@ -99,14 +99,24 @@ export const useSimStore = create<SimStore>((set, get) => {
     applySeed: () => {
       const seed = parseInt(get().seedInput, 10);
       if (Number.isFinite(seed)) {
-        set({ fuelLoadKg: INITIAL_FUEL_KG });
-        send({ cmd: 'config', seed: seed >>> 0, scenario: get().scenario });
+        send({
+          cmd: 'config',
+          seed: seed >>> 0,
+          scenario: get().scenario,
+          fuelKg: get().fuelLoadKg,
+        });
       }
     },
-    setScenario: (s) => {
-      set({ scenario: s, fuelLoadKg: INITIAL_FUEL_KG });
+    setScenario: (s, fuelKg) => {
+      const fuel = Math.max(0, fuelKg ?? get().fuelLoadKg);
+      set({ scenario: s, fuelLoadKg: fuel });
       const seed = parseInt(get().seedInput, 10);
-      send({ cmd: 'config', seed: Number.isFinite(seed) ? seed >>> 0 : 1337, scenario: s });
+      send({
+        cmd: 'config',
+        seed: Number.isFinite(seed) ? seed >>> 0 : 1337,
+        scenario: s,
+        fuelKg: fuel,
+      });
     },
     setFuelLoad: (kg) => {
       const v = Math.max(0, kg);

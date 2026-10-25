@@ -55,6 +55,8 @@ export interface Mission {
   zones: MissionZone[];
   groundStation: GroundStation;
   customSites: LandingSite[];
+  /** Fuel loaded at T+0, kg. Bounded by the engine profile capacity. */
+  fuelLoadKg: number;
   weatherMode: WeatherMode;
   /** Template provenance, shown in the editor. */
   templateId?: string;
@@ -93,6 +95,7 @@ export interface GaugeSpec {
 export interface EngineProfile {
   id: string;
   name: string;
+  fuelCapacityKg: number;
   gauges: Record<GaugeId, GaugeSpec>;
 }
 
@@ -105,6 +108,7 @@ export const ENGINE_PROFILES: EngineProfile[] = [
   {
     id: 'nominal',
     name: 'Nominal Rotax-class',
+    fuelCapacityKg: MISSION_FUEL_KG,
     gauges: {
       rpm: {
         id: 'rpm',
@@ -179,6 +183,17 @@ export const ENGINE_PROFILES: EngineProfile[] = [
 
 export function engineProfileById(id: string): EngineProfile {
   return ENGINE_PROFILES.find((p) => p.id === id) ?? ENGINE_PROFILES[0];
+}
+
+export function engineFuelCapacityKg(profileId: string): number {
+  return engineProfileById(profileId).fuelCapacityKg;
+}
+
+/** New missions start full; the profile capacity is the default fuel load. */
+export function clampFuelLoadKg(kg: unknown, profileId: string): number {
+  const capacity = engineFuelCapacityKg(profileId);
+  if (typeof kg !== 'number' || !Number.isFinite(kg)) return capacity;
+  return Math.max(0, Math.min(capacity, Math.round(kg)));
 }
 
 export function nodeTypeLabel(type: NodeType): string {

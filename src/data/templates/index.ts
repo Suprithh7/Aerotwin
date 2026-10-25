@@ -6,7 +6,7 @@ import rajasthan from './rajasthan.json';
 import coastal from './coastal.json';
 import plainsAgri from './plains-agri.json';
 import coastalSurvey from './coastal-survey.json';
-import type { Mission, MissionTemplate } from '../../mission/types';
+import { clampFuelLoadKg, type Mission, type MissionTemplate } from '../../mission/types';
 
 export const MISSION_TEMPLATES = [
   ladakh,
@@ -26,6 +26,7 @@ export function cloneTemplate(id: string): Mission {
   const t = templateById(id) ?? MISSION_TEMPLATES[0];
   return {
     ...t,
+    fuelLoadKg: clampFuelLoadKg((t as Mission).fuelLoadKg, t.engineProfileId),
     nodes: t.nodes.map((n) => ({ ...n })),
     zones: t.zones.map((z) => ({ ...z, polygon: z.polygon.map((p) => [...p] as [number, number]) })),
     customSites: t.customSites.map((s) => ({ ...s })),

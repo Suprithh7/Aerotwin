@@ -1,5 +1,6 @@
 // Mission-layer assumptions. Every value here is an engineering assumption for
 // this prototype and is listed in ASSUMPTIONS.md.
+import { FUEL_CAPACITY_KG } from '../sim/constants';
 import type { TurbulenceLevel } from '../sim/types';
 
 export type SegKindName = 'takeoff' | 'climb' | 'cruise' | 'loiter' | 'descent' | 'landing';
@@ -73,8 +74,9 @@ export const LANDING_S = 120;
 // flagged wind-limited rather than becoming infinite.
 export const MIN_GROUNDSPEED_MS = 10;
 
-// Mission fuel load (kg) and the reserve that must remain at landing.
-export const MISSION_FUEL_KG = 95;
+// Tank capacity (kg) and the reserve that must remain at landing. The loaded
+// fuel is a per-mission field (`Mission.fuelLoadKg`), not a constant.
+export const MISSION_FUEL_KG = FUEL_CAPACITY_KG;
 export const MISSION_RESERVE_KG = 12;
 
 // Vibration is a mission-layer monitoring limit; thermal and oil limits live

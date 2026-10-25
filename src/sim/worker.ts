@@ -1,12 +1,12 @@
 // Simulation Web Worker: runs the 20 Hz model, posts UI state at 10 Hz.
 import { Sim } from './sim';
-import { DEFAULT_SCENARIO, HIST_WINDOW_S, SIM_DT } from './constants';
+import { DEFAULT_SCENARIO, FUEL_CAPACITY_KG, HIST_WINDOW_S, SIM_DT } from './constants';
 import { Diagnoser, type Diagnosis } from '../diagnosis/diagnose';
 import { createSignatureBuilder } from '../diagnosis/signatures';
 import type { FaultSpec, HistPoint, Scenario, Snapshot } from './types';
 
 export type WorkerCommand =
-  | { cmd: 'config'; seed: number; scenario: Scenario }
+  | { cmd: 'config'; seed: number; scenario: Scenario; fuelKg: number }
   | { cmd: 'speed'; value: number }
   | { cmd: 'pause'; value: boolean }
   | { cmd: 'step' }
@@ -18,7 +18,7 @@ export type WorkerMessage =
   | { type: 'reset' }
   | { type: 'tick'; snapshot: Snapshot; records: HistPoint[]; diagnosis: Diagnosis };
 
-let sim = new Sim({ seed: 1337, scenario: DEFAULT_SCENARIO });
+let sim = new Sim({ seed: 1337, scenario: DEFAULT_SCENARIO, fuelKg: FUEL_CAPACITY_KG });
 let speed = 1;
 let paused = false;
 let pendingSteps = 0;
@@ -34,7 +34,7 @@ self.onmessage = (e: MessageEvent<WorkerCommand>) => {
   const m = e.data;
   switch (m.cmd) {
     case 'config':
-      sim = new Sim({ seed: m.seed >>> 0, scenario: m.scenario });
+      sim = new Sim({ seed: m.seed >>> 0, scenario: m.scenario, fuelKg: m.fuelKg });
       // New residuals, so the severity history and projection start over.
       diagnoser = new Diagnoser(builder.library);
       needReset = true;

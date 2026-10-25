@@ -4,9 +4,9 @@ import { atmosphere, type Atmosphere } from './atmosphere';
 import {
   CHANNELS,
   EWMA_TAU_S,
+  FUEL_CAPACITY_KG,
   GUST,
   HIST_INTERVAL,
-  INITIAL_FUEL_KG,
   PHASES,
   SIM_DT,
   TURB,
@@ -35,6 +35,8 @@ import type {
 export interface SimOptions {
   seed: number;
   scenario: Scenario;
+  /** Fuel at T+0. Defaults to tank capacity for standalone engineering runs. */
+  fuelKg?: number;
 }
 
 // Settled nominal engine states per (phase, altitude, ISA dev): the warm-up
@@ -45,7 +47,7 @@ const warmCache = new Map<string, EngineState>();
 function warmState(a: Atmosphere, ph: (typeof PHASES)[Phase], key: string): EngineState {
   let s = warmCache.get(key);
   if (!s) {
-    s = initialState(a, ph.rpmTarget, ph.throttle, INITIAL_FUEL_KG);
+    s = initialState(a, ph.rpmTarget, ph.throttle, FUEL_CAPACITY_KG);
     const inputs: EngineInputs = {
       atmos: a,
       airspeedMs: ph.airspeedMs,
@@ -72,10 +74,12 @@ function cloneState(s: EngineState): EngineState {
  * Settled nominal engine state for a scenario, without constructing a Sim.
  * Used by the headless mission runner when there is no live twin to copy.
  */
-export function settledEngineState(scenario: Scenario): EngineState {
+export function settledEngineState(scenario: Scenario, fuelKg?: number): EngineState {
   const ph = PHASES[scenario.phase];
   const a = atmosphere(scenario.altitude, scenario.isaDev);
-  return warmState(a, ph, `${scenario.phase}|${scenario.altitude}|${scenario.isaDev}`);
+  const s = warmState(a, ph, `${scenario.phase}|${scenario.altitude}|${scenario.isaDev}`);
+  s.fuelKg = Math.max(0, fuelKg ?? FUEL_CAPACITY_KG);
+  return s;
 }
 
 export class Sim {
@@ -119,6 +123,7 @@ export class Sim {
     const warmKey = `${this.scenario.phase}|${this.scenario.altitude}|${this.scenario.isaDev}`;
     this.trueState = warmState(a, ph, warmKey);
     this.twinState = warmState(a, ph, warmKey);
+    this.setFuelKg(opts.fuelKg ?? FUEL_CAPACITY_KG);
     this.trueChannels = deriveChannels(this.trueState, nominalParams(), this.lastInputs);
     this.twinChannels = deriveChannels(this.twinState, nominalParams(), this.lastInputs);
     this.measChannels = { ...this.trueChannels };

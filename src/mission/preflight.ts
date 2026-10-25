@@ -8,7 +8,6 @@ import { GLIDE_RATIO, airfieldsInGlideRange } from '../nav/alternates';
 import { MAX_LINK_RANGE_KM, radioHorizonKm } from '../payload/link';
 import {
   CEILING_DENSITY_ALT_M,
-  MISSION_FUEL_KG,
   MISSION_RESERVE_KG,
 } from './constants';
 import { zoneCrossings, routeSamples, type ZoneCrossing } from './geometry';
@@ -16,6 +15,7 @@ import { missionDtFor, planMission, runMission, wxAt, type MissionPlan } from '.
 import { legGeometry, distanceM, type Waypoint } from './route';
 import { terrainCached, terrainElevation } from './terrain';
 import type { Mission } from './types';
+import { engineFuelCapacityKg } from './types';
 import type { Airfield } from '../data/airfields';
 import type { TurbulenceLevel } from '../sim/types';
 import type { WaypointWeather } from './weather';
@@ -37,6 +37,7 @@ export interface PreflightFuel {
   marginKg: number;
   marginMin: number;
   reserveKg: number;
+  loadKg: number;
   capacityKg: number;
 }
 
@@ -67,16 +68,19 @@ function fmtMin(v: number): string {
 export function nominalFuel(
   wps: Waypoint[],
   weather: WaypointWeather[],
+  fuelLoadKg: number,
 ): { burnKg: number; timeS: number } | null {
   if (wps.length < 2) return null;
   const plan = planMission(wps, weather);
-  const start = settledEngineState({
-    phase: 'cruise',
-    altitude: wps[0].altM,
-    isaDev: Math.round(wxAt(weather, 0).isaDevC),
-    turbulence: 'none',
-  });
-  start.fuelKg = MISSION_FUEL_KG;
+  const start = settledEngineState(
+    {
+      phase: 'cruise',
+      altitude: wps[0].altM,
+      isaDev: Math.round(wxAt(weather, 0).isaDevC),
+      turbulence: 'none',
+    },
+    fuelLoadKg,
+  );
   const run = runMission({
     plan,
     waypoints: wps,
@@ -197,6 +201,7 @@ function zonesCheck(mission: Mission, wps: Waypoint[]): {
 }
 
 function fuelCheck(
+  mission: Mission,
   wps: Waypoint[],
   weather: WaypointWeather[],
   plan: MissionPlan,
@@ -204,9 +209,10 @@ function fuelCheck(
   if (plan.totalS <= 0) {
     return { status: 'FAIL', sentence: 'The profile could not be planned.', fuel: null };
   }
-  const nominal = nominalFuel(wps, weather);
+  const fuelLoadKg = mission.fuelLoadKg;
+  const nominal = nominalFuel(wps, weather, fuelLoadKg);
   if (!nominal) return { status: 'FAIL', sentence: 'No nominal run was possible.', fuel: null };
-  const marginKg = MISSION_FUEL_KG - nominal.burnKg - MISSION_RESERVE_KG;
+  const marginKg = fuelLoadKg - nominal.burnKg - MISSION_RESERVE_KG;
   const burnPerMin = nominal.burnKg / Math.max(1, nominal.timeS / 60);
   const marginMin = marginKg / Math.max(0.01, burnPerMin);
   const fuel: PreflightFuel = {
@@ -214,11 +220,12 @@ function fuelCheck(
     marginKg,
     marginMin,
     reserveKg: MISSION_RESERVE_KG,
-    capacityKg: MISSION_FUEL_KG,
+    loadKg: fuelLoadKg,
+    capacityKg: engineFuelCapacityKg(mission.engineProfileId),
   };
   const sentence =
-    `Nominal burn ${nominal.burnKg.toFixed(1)} kg leaves ${marginKg.toFixed(1)} kg ` +
-    `(${fmtMin(marginMin)}) after the 30 min reserve.`;
+    `Loaded ${fuelLoadKg} kg; nominal burn ${nominal.burnKg.toFixed(1)} kg leaves ` +
+    `${marginKg.toFixed(1)} kg (${fmtMin(marginMin)}) after the 30 min reserve.`;
   if (marginKg < 0) return { status: 'FAIL', sentence, fuel };
   if (marginKg < 6) return { status: 'CAUTION', sentence, fuel };
   return { status: 'PASS', sentence, fuel };
@@ -352,7 +359,7 @@ export function buildPreflight(
   const plan = planMission(wps, weather);
   const terrain = terrainCheck(wps);
   const zones = zonesCheck(mission, wps);
-  const fuel = fuelCheck(wps, weather, plan);
+  const fuel = fuelCheck(mission, wps, weather, plan);
   const alternates = alternatesCheck(mission, wps);
   const datalink = datalinkCheck(mission, wps);
   const wx = weatherCheck(wps, plan, weather);

@@ -27,7 +27,6 @@ import {
   MC_REFRESH_PARAMS_S,
   MISSION_AIRSPEED,
   MISSION_DT,
-  MISSION_FUEL_KG,
   MISSION_POWER,
   MISSION_RESERVE_KG,
   MIN_GROUNDSPEED_MS,
@@ -268,7 +267,7 @@ export function itemsFromFaults(faults: ActiveFaultInfo[]): DegradationItem[] {
 }
 
 /** Mission start state taken from the live twin, faults and all. */
-export function healthFromSnapshot(snap: Snapshot | null): MissionHealth {
+export function healthFromSnapshot(snap: Snapshot | null, fuelLoadKg: number): MissionHealth {
   if (!snap) return { items: [], state: null };
   const r = snap.readings;
   const ph = PHASES[snap.phase];
@@ -281,7 +280,7 @@ export function healthFromSnapshot(snap: Snapshot | null): MissionHealth {
     throttle: ph.throttle,
     govInt: 0,
     vib: r.vib.true,
-    fuelKg: MISSION_FUEL_KG,
+    fuelKg: Math.max(0, fuelLoadKg),
   };
   return { items: itemsFromFaults(snap.faults), state };
 }

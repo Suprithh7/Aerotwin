@@ -22,6 +22,7 @@ import {
   NODE_TYPES,
   SITE_TYPES,
   ZONE_TYPES,
+  engineFuelCapacityKg,
   type MissionNode,
   type NodeType,
 } from '../../mission/types';
@@ -1419,6 +1420,7 @@ export default function BriefStage() {
   const setWeatherMode = useMissionStore((s) => s.setWeatherMode);
   const refreshWeather = useMissionStore((s) => s.refreshWeather);
   const setEngineProfile = useMissionStore((s) => s.setEngineProfile);
+  const setFuelLoadKg = useMissionStore((s) => s.setFuelLoadKg);
 
   const scenarioId = useRehearsalStore((s) => s.scenarioId);
   const setScenarioId = useRehearsalStore((s) => s.setScenarioId);
@@ -1646,6 +1648,27 @@ export default function BriefStage() {
                     ))}
                   </select>
                 </label>
+              </div>
+
+              <div className="mt-1 grid grid-cols-[1fr_92px] gap-1">
+                <label className="text-[9px] text-ink-3">
+                  Fuel load
+                  <TextCell
+                    ariaLabel="Mission fuel load"
+                    value={String(mission.fuelLoadKg)}
+                    className="mt-0.5 w-full"
+                    onCommit={(t) => {
+                      const v = numberText(t);
+                      return v !== null && setFuelLoadKg(v);
+                    }}
+                  />
+                </label>
+                <div className="text-[9px] text-ink-3">
+                  Capacity
+                  <div className="num mt-0.5 flex h-[24px] items-center border border-edge bg-sheet px-1.5 font-mono text-[11px] text-ink-3">
+                    {engineFuelCapacityKg(mission.engineProfileId)} kg
+                  </div>
+                </div>
               </div>
 
               <div className="mt-2">

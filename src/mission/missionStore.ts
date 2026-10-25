@@ -2,7 +2,6 @@
 // for the brief, flight, risk assessment, alternates, payload and Data Guard;
 // editing actions snapshot the previous mission for undo/redo.
 import { create } from 'zustand';
-import { MISSION_FUEL_KG, MISSION_RESERVE_KG } from './constants';
 import {
   healthFromSnapshot,
   planMission,
@@ -26,6 +25,7 @@ import { buildTrack, distanceM } from './route';
 import { missionFromGeoJson, missionToGeoJsonText } from './geoJson';
 import {
   MAX_NODES,
+  clampFuelLoadKg,
   type LandingSite,
   type Mission,
   type MissionNode,
@@ -108,6 +108,7 @@ export interface MissionStore {
   setStartTime: (istValue: string) => boolean;
   setWeatherMode: (mode: WeatherMode) => void;
   setEngineProfile: (id: string) => void;
+  setFuelLoadKg: (kg: number) => boolean;
 
   // nodes
   addNodeAt: (lat: number, lon: number, type?: NodeType) => void;
@@ -236,6 +237,7 @@ function writeSaved(saved: SavedMission[]): void {
 function cloneMission(m: Mission): Mission {
   return {
     ...m,
+    fuelLoadKg: clampFuelLoadKg(m.fuelLoadKg, m.engineProfileId),
     nodes: m.nodes.map((n) => ({ ...n })),
     zones: m.zones.map((z) => ({ ...z, polygon: z.polygon.map((p) => [...p] as [number, number]) })),
     customSites: m.customSites.map((s) => ({ ...s })),
@@ -288,8 +290,6 @@ export function missionClockPosition(
   return positionAtClock(currentPlan(waypoints, weather), waypoints, clockS);
 }
 
-export const MISSION_FUEL = { loadedKg: MISSION_FUEL_KG, reserveKg: MISSION_RESERVE_KG };
-
 export function legRiskColor(breachFrac: number): string {
   const t = Math.max(0, Math.min(1, breachFrac));
   const a = [91, 141, 184];
@@ -305,10 +305,13 @@ export const TEMPLATE_LIST = MISSION_TEMPLATES.map((t) => ({
   description: t.description,
 }));
 
-/** Engine degradation carried into the mission: live faults plus their state. */
-export function missionHealthInput(): { items: DegradationItem[]; state: McRequest['initState'] } {
+/** Engine degradation and fuel load carried into the mission. */
+export function missionHealthInput(mission: Mission): {
+  items: DegradationItem[];
+  state: McRequest['initState'];
+} {
   const snap = useSimStore.getState().snapshot;
-  const h = healthFromSnapshot(snap);
+  const h = healthFromSnapshot(snap, mission.fuelLoadKg);
   return { items: h.items, state: h.state };
 }
 
@@ -498,6 +501,14 @@ export const useMissionStore = create<MissionStore>((set, get) => {
     setEngineProfile: (id) => {
       if (!id || id === get().mission.engineProfileId) return;
       commitWith({ engineProfileId: id });
+    },
+
+    setFuelLoadKg: (kg) => {
+      if (!Number.isFinite(kg)) return false;
+      const mission = get().mission;
+      const fuelLoadKg = clampFuelLoadKg(kg, mission.engineProfileId);
+      if (fuelLoadKg !== mission.fuelLoadKg) commitWith({ fuelLoadKg });
+      return true;
     },
 
     addNodeAt: (lat, lon, type = 'WAYPOINT') => {
@@ -1089,12 +1100,13 @@ export const useMissionStore = create<MissionStore>((set, get) => {
       const wps = resolveWaypoints(s.mission);
       if (wps.length < 2) return;
       const seq = ++mcSeq;
-      const health = missionHealthInput();
+      const health = missionHealthInput(s.mission);
       const req: McRequest = {
         waypoints: wps,
         weather: weatherValues(s.weather),
         items: health.items,
         initState: health.state,
+        fuelLoadKg: s.mission.fuelLoadKg,
         runs: s.runs,
         seed: s.seed,
         growthPerH: null,

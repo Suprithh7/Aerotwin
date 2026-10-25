@@ -19,7 +19,6 @@ import {
   MC_MIN_RUNS,
   MC_WEAR_RATE_PER_H,
   MC_WEAR_SPREAD_PER_H,
-  MISSION_FUEL_KG,
 } from './constants';
 import {
   missionDtFor,
@@ -41,6 +40,8 @@ export interface McRequest {
   weather: WaypointWeather[];
   items: DegradationItem[];
   initState: EngineState | null;
+  /** Fuel loaded at T+0, kg, from the mission. */
+  fuelLoadKg: number;
   runs?: number;
   seed: number;
   /** severity growth per flight hour from the diagnosis estimate, if any */
@@ -171,7 +172,7 @@ export function missionStartState(req: McRequest): EngineState {
         isaDev: Math.round(wxAt(req.weather, 0).isaDevC),
         turbulence: 'none',
       });
-  base.fuelKg = MISSION_FUEL_KG;
+  base.fuelKg = Math.max(0, req.fuelLoadKg);
   return base;
 }
 

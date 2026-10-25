@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { DEFAULT_SCENARIO } from '../sim/constants';
 import { useSimStore } from '../state/store';
+import { useMissionStore } from '../mission/missionStore';
 import type {
   DebriefResult,
   EventTone,
@@ -51,7 +52,8 @@ export const useRehearsalStore = create<RehearsalStore>((set, get) => ({
     sim.setSpeed(1);
     const epochTarget = sim.simEpoch + 1;
     // Config resets the run and clears all injected faults in the worker.
-    sim.setScenario(DEFAULT_SCENARIO);
+    const mission = useMissionStore.getState().mission;
+    sim.setScenario(DEFAULT_SCENARIO, mission.fuelLoadKg);
     set({
       stage: 'fly',
       overlayOpen: false,

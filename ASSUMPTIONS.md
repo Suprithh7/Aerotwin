@@ -233,7 +233,10 @@ An over-limit condition with no matched signature but a large residual is not
 described as modelled.
 
 ## Mission / demo setup
-`INITIAL_FUEL_KG` = 42 kg (`constants.ts:84`).
+`FUEL_CAPACITY_KG` = 95 kg tank capacity (`src/sim/constants.ts`). Each
+mission carries `fuelLoadKg` (default: full profile capacity, editable as
+"Fuel load" in BRIEF); the pre-flight FUEL check and the FLY simulation both
+start from that value.
 Default scenario: cruise, 3000 m, ISA +0, no turbulence, seed 1337
 (`src/state/store.ts:26-31` and `:63`, `src/sim/worker.ts:19-23`).
 Chart window 120 s, history stride 0.1 s, sim step 0.05 s (20 Hz),
@@ -313,7 +316,7 @@ landing. All speeds and rates are assumed constants:
 | `DESCENT_RATE_MS` | 5.0 | m/s | `constants.ts:54` |
 | `TAKEOFF_S` | 30 | s | `constants.ts:58` |
 | `LANDING_S` | 120 | s | `constants.ts:59` |
-| `MISSION_FUEL_KG` | 95 | kg | `constants.ts:66` |
+| `MISSION_FUEL_KG` (tank capacity) | 95 | kg | `constants.ts:66` |
 | `MISSION_RESERVE_KG` | 12 | kg that must remain at landing | `constants.ts:67` |
 
 ## Mission power schedule — `src/mission/constants.ts:43-50`
@@ -448,7 +451,7 @@ Health parameters are refreshed every 60 s of mission time and scale with
 severity as `1 + growth·hours` (`constants.ts:97`, `mission.ts:510-512`). A
 run starts from the engine's current state — the live snapshot's active faults
 and severity, or, with no twin, a warm power-settled engine at field elevation
-carrying the full mission fuel load (`monteCarlo.ts:155-166`).
+carrying the mission's `fuelLoadKg` (`monteCarlo.ts:155-166`).
 
 The healthy-vs-current bars are two deterministic full-length runs
 (`monteCarlo.ts:294-333`), and three rules keep them honest:
@@ -1151,7 +1154,8 @@ ASSESS MISSION is rerun.
 | DATALINK | ≥ 90 % of route within link range | 60-90 % | < 60 % |
 | WEATHER | DA below ceiling − 500 m and < severe turbulence | DA ≤ ceiling with < 500 m margin, or severe turbulence | DA above the 6.3 km ceiling |
 
-Fuel uses the nominal healthy full-profile run, `MISSION_FUEL_KG` 95 kg and a
+Fuel uses the nominal healthy full-profile run from the mission's
+`fuelLoadKg` (bounded by the 95 kg profile capacity) and a
 **12 kg / 30 min** reserve; margin minutes are margin divided by nominal burn
 per minute. Alternates use glide ratio **12:1**; datalink samples every 2 km
 (up to 500 samples) against `min(250 km, radio horizon)`; weather compares the
