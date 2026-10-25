@@ -13,24 +13,33 @@ export const CYLINDER_FAULTS_SET = new Set([
   'compression',
 ]);
 
-export function chtColor(cht: number, min = 40, max = 240): string {
-  // flat blue -> amber -> red ramp (steel #5B8DB8, amber #C9922E, red #C4443F)
-  const t = Math.max(0, Math.min(1, (cht - min) / (max - min)));
-  const stops: [number, [number, number, number]][] = [
-    [0, [91, 141, 184]],
-    [0.5, [201, 146, 46]],
-    [1, [196, 68, 63]],
-  ];
-  let a = stops[0];
-  let b = stops[stops.length - 1];
-  for (let i = 0; i < stops.length - 1; i++) {
-    if (t >= stops[i][0] && t <= stops[i + 1][0]) {
-      a = stops[i];
-      b = stops[i + 1];
-      break;
-    }
-  }
-  const f = (t - a[0]) / (b[0] - a[0] || 1);
-  const c = a[1].map((v, i) => Math.round(v + (b[1][i] - v) * f));
+const STEEL: [number, number, number] = [91, 141, 184];
+const AMBER: [number, number, number] = [201, 146, 46];
+const RED: [number, number, number] = [196, 68, 63];
+
+function rgb(c: [number, number, number]): string {
   return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+
+function mix(a: [number, number, number], b: [number, number, number], f: number): string {
+  return rgb(a.map((v, i) => Math.round(v + (b[i] - v) * f)) as [number, number, number]);
+}
+
+/**
+ * Thermal ramp anchored to the channel's own bands: blue-grey through the
+ * nominal range, blending toward amber as the caution band approaches, amber
+ * across caution, and red only at the limit (or above it).
+ */
+export function thermalColor(
+  value: number,
+  nominalC: number,
+  cautionC: number,
+  limitC: number,
+): string {
+  if (value <= nominalC) return rgb(STEEL);
+  if (value >= limitC) return rgb(RED);
+  if (value <= cautionC) {
+    return mix(STEEL, AMBER, (value - nominalC) / (cautionC - nominalC));
+  }
+  return mix(AMBER, RED, (value - cautionC) / (limitC - cautionC));
 }

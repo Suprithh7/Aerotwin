@@ -8,5 +8,7 @@ export const OILP_MIN_BAR = 0.8; // min oil pressure below 3500 rpm
 
 // Caution bands used to colour the thermal ramp: nominal stays blue-grey,
 // amber starts only near the limit, red is reserved for the limit itself.
+export const CHT_NOMINAL_C = 110; // top of the continuous nominal CHT band
 export const CHT_CAUTION_C = 120;
+export const OILT_NOMINAL_C = 100; // top of the continuous nominal oil band
 export const OILT_CAUTION_C = 110;

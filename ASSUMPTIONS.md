@@ -82,8 +82,15 @@ the public operator's manual and type certificate, not invented:
 | `CHT_LIMIT_C` | 135 | °C | Rotax 914 Operator's Manual, coolant temperature max; applied here to the lumped head temperature |
 | `OILT_LIMIT_C` | 130 | °C | Rotax 914 Operator's Manual, oil temperature max |
 | `OILP_MIN_BAR` | 0.8 | bar | Rotax 914 Operator's Manual, minimum below 3500 rpm |
+| `CHT_NOMINAL_C` | 110 | °C | display band only (not a limit); top of the continuous nominal CHT band |
 | `CHT_CAUTION_C` | 120 | °C | display band only (not a limit); set below the 135 °C limit |
+| `OILT_NOMINAL_C` | 100 | °C | display band only; top of the continuous nominal oil band |
 | `OILT_CAUTION_C` | 110 | °C | display band only; top of the normal oil range |
+
+The engine schematic colours each head and the oil-temperature readout on a
+three-anchor ramp: blue-grey through the nominal band, a blend to amber as the
+caution temperature approaches, amber across caution, and red only at the
+limit. The anchors are display bands, not new physical thresholds.
 
 Sources:
 - BRP-Rotax **914 Operator's Manual, Edition 3** —

@@ -1,20 +1,30 @@
 import { useSimStore } from '../state/store';
-import { chtColor } from '../sim/uiMeta';
+import { thermalColor } from '../sim/uiMeta';
+import {
+  CHT_CAUTION_C,
+  CHT_LIMIT_C,
+  CHT_NOMINAL_C,
+  OILT_CAUTION_C,
+  OILT_LIMIT_C,
+  OILT_NOMINAL_C,
+} from '../sim/limits';
 import type { ChannelId } from '../sim/types';
 
 function Readout({
   label,
   value,
   unit,
+  color,
 }: {
   label: string;
   value: number | null;
   unit: string;
+  color?: string;
 }) {
   return (
     <div className="flex justify-between border-t border-edge py-1">
       <span className="text-dim">{label}</span>
-      <span className="num font-mono">
+      <span className="num font-mono" style={color ? { color } : undefined}>
         {value === null ? '--' : value.toFixed(value >= 100 ? 0 : 1)} {unit}
       </span>
     </div>
@@ -57,6 +67,7 @@ export default function EngineSchematic() {
         </text>
         {cyls.map((c) => {
           const cht = r ? r[(`cht${c.id}`) as ChannelId].measured : null;
+          const fill = cht === null ? '#232A33' : thermalColor(cht, CHT_NOMINAL_C, CHT_CAUTION_C, CHT_LIMIT_C);
           const headY = c.up ? 40 : 130;
           const barrelY = c.up ? 58 : 106;
           const labelY = c.up ? 30 : 162;
@@ -69,7 +80,7 @@ export default function EngineSchematic() {
                 y={barrelY}
                 width={30}
                 height={24}
-                fill={cht === null ? '#232A33' : chtColor(cht)}
+                fill={fill}
                 stroke="#232A33"
               />
               {/* head */}
@@ -78,7 +89,7 @@ export default function EngineSchematic() {
                 y={headY}
                 width={30}
                 height={18}
-                fill={cht === null ? '#232A33' : chtColor(cht)}
+                fill={fill}
                 stroke="#232A33"
               />
               <text
@@ -109,7 +120,9 @@ export default function EngineSchematic() {
         <Readout label="RPM" value={r ? r[CH.rpm].measured : null} unit="rpm" />
         <Readout label="MAP" value={r ? r[CH.map].measured : null} unit="kPa" />
         <Readout label="BOOST" value={r ? r[CH.boost].measured : null} unit="kPa" />
-        <Readout label="OIL TEMP" value={r ? r[CH.oilT].measured : null} unit="C" />
+        <Readout label="OIL TEMP" value={r ? r[CH.oilT].measured : null} unit="C"
+          color={r ? thermalColor(r[CH.oilT].measured, OILT_NOMINAL_C, OILT_CAUTION_C, OILT_LIMIT_C) : undefined}
+        />
         <Readout label="OIL PRESS" value={r ? r[CH.oilP].measured : null} unit="bar" />
         <Readout
           label="SHAFT POWER"
