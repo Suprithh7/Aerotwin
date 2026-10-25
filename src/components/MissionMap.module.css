@@ -40,6 +40,139 @@
   color: #c9922e;
 }
 
+/* --- airfield and place tags ------------------------------------------- */
+.af {
+  color: #93a0b0;
+}
+
+.afRole {
+  color: #d7dee7;
+}
+
+.place {
+  color: #93a0b0;
+  font-size: 10px;
+}
+
+.divert {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  line-height: 12px;
+  letter-spacing: 0.03em;
+  font-variant-numeric: tabular-nums;
+  text-transform: uppercase;
+  color: #d7dee7;
+  background-color: #11151a;
+  border: 1px solid #232a33;
+  padding: 1px 4px;
+  white-space: nowrap;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* --- alternate readout -------------------------------------------------- */
+.navcard {
+  position: absolute;
+  top: 22px;
+  left: 8px;
+  z-index: 2;
+  max-width: min(340px, 60%);
+  padding: 4px 8px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  line-height: 14px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: #93a0b0;
+  background-color: #11151a;
+  border: 1px solid #232a33;
+  pointer-events: none;
+}
+
+.navHead {
+  color: #d7dee7;
+}
+
+.ok {
+  color: #5b8db8;
+}
+
+.warn {
+  color: #c9922e;
+}
+
+.crit {
+  color: #c4443f;
+}
+
+.note {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  z-index: 2;
+  padding: 2px 6px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  line-height: 12px;
+  color: #93a0b0;
+  background-color: #11151a;
+  border-top: 1px solid #232a33;
+  border-right: 1px solid #232a33;
+  pointer-events: none;
+}
+
+/* --- airfield popup ----------------------------------------------------- */
+.pop {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  line-height: 14px;
+  letter-spacing: 0.03em;
+  font-variant-numeric: tabular-nums;
+  color: #d7dee7;
+}
+
+.popRow {
+  display: grid;
+  grid-template-columns: 46px 1fr;
+  gap: 8px;
+}
+
+.popKey {
+  color: #93a0b0;
+  text-transform: uppercase;
+}
+
+.popValue {
+  text-align: right;
+}
+
+/* MapLibre's popup is light-themed with rounded chrome; both are replaced so
+   the card reads as flat console furniture. */
+.popup :global(.maplibregl-popup-content) {
+  /* the right-hand band holds the close button */
+  padding: 8px 26px 8px 8px;
+  background-color: #11151a;
+  border: 1px solid #232a33;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* Only one of the four tip borders renders for a given anchor, so all are set. */
+.popup :global(.maplibregl-popup-tip) {
+  border-top-color: #11151a;
+  border-bottom-color: #11151a;
+  border-left-color: #11151a;
+  border-right-color: #11151a;
+}
+
+.popup :global(.maplibregl-popup-close-button) {
+  color: #93a0b0;
+  background: transparent;
+  font-family: 'IBM Plex Mono', monospace;
+  padding: 0 4px;
+}
+
 /* MapLibre ships light-theme control chrome; only the attribution control is
    kept on screen, so it is the only thing re-tuned to the console palette. */
 .wrap :global(.maplibregl-ctrl-attrib),

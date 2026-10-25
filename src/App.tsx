@@ -6,6 +6,7 @@ import StripCharts from './components/StripCharts';
 import EngineSchematic from './components/EngineSchematic';
 import MissionMap from './components/MissionMap';
 import MissionPanel from './components/MissionPanel';
+import DiagnosisPanel from './components/DiagnosisPanel';
 import { currentPlan, useMissionStore } from './mission/missionStore';
 import { useSimStore } from './state/store';
 
@@ -52,13 +53,16 @@ export default function App() {
         <div className="flex-1 flex min-h-0">
           <div className="w-64 shrink-0 border-r border-edge flex flex-col min-h-0 overflow-y-auto">
             <FaultPanel />
+            <DiagnosisPanel />
             <ScenarioPanel />
           </div>
           <div className="flex-1 min-w-0 flex flex-col">
             <StripCharts />
           </div>
           <div className="w-80 shrink-0 border-l border-edge overflow-y-auto flex flex-col">
-            <MissionClock />
+            <div className="shrink-0">
+              <MissionClock />
+            </div>
             <EngineSchematic />
           </div>
         </div>

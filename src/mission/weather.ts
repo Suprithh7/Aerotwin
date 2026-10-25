@@ -56,12 +56,15 @@ export const WEATHER_PRESETS: WeatherPreset[] = [
     turb: expandT(['light', 'moderate', 'moderate', 'severe', 'moderate', 'light'], MAXW),
   },
   {
-    // Each waypoint's wind is set to oppose its outbound leg: an illustrative
-    // worst-case headwind profile, not a synoptic pattern.
+    // A strong wind from the south-southeast: on the coastal preset, whose legs
+    // run MUMBAI > GOA > MANGALURU > KOCHI on bearings of about 167, 158 and
+    // 150 deg, it is a near-full headwind on every leg. On routes that do not
+    // head south it is simply a strong gradient wind. An illustrative worst
+    // case, not a synoptic pattern.
     id: 'headwind',
     name: 'HEADWIND + TURBULENCE',
     isaDevC: expand([6, 6, 8, 7, 6, 5], MAXW),
-    windDirDeg: expand([252, 14, 135, 271, 252, 252], MAXW),
+    windDirDeg: expand([165, 168, 170, 168, 165, 165], MAXW),
     windSpdMs: expand([13, 15, 14, 16, 13, 12], MAXW),
     gustMs: expand([20, 24, 22, 26, 20, 19], MAXW),
     turb: expandT(['severe', 'severe', 'severe', 'severe', 'moderate', 'moderate'], MAXW),

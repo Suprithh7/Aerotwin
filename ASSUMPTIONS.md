@@ -129,29 +129,31 @@ planning or profile assumption, not a change to the physics.
 ## Route geometry — `src/mission/route.ts`
 | Item | Value | Units | Location |
 |---|---|---|---|
-| Earth radius (spherical haversine) | 6 371 000 | m | `route.ts:22` |
-| Leg distance | great-circle haversine | m | `route.ts:28` |
-| Leg course | initial great-circle bearing, true 0-360 | deg | `route.ts:38` |
-| Wind convention | meteorological, direction the wind blows FROM | deg | `route.ts:52` |
-| Groundspeed | TAS − headwind, floored | m/s | `route.ts:65`, `mission.ts:167` |
+| Earth radius (spherical haversine) | 6 371 000 | m | `route.ts:26` |
+| Leg distance | great-circle haversine | m | `route.ts:32` |
+| Leg course | initial great-circle bearing, true 0-360 | deg | `route.ts:42` |
+| Wind convention | meteorological, direction the wind blows FROM | deg | `route.ts:56` |
+| Groundspeed | TAS − headwind, floored | m/s | `route.ts:69`, `mission.ts:167` |
 | Minimum planned groundspeed | 10 (a slower leg is flagged wind-limited, never infinite) | m/s | `constants.ts:63` |
 
 Track sampling for the marker is 24 straight-line samples per leg
-(`route.ts:177`); the marker position interpolates that polyline, so it follows
+(`route.ts:191`); the marker position interpolates that polyline, so it follows
 the drawn route rather than a recomputed great circle.
 
-## Route presets — `src/mission/route.ts:117-158`
-**Illustrative waypoints only.** The coordinates, altitudes and loiter holds
-below were chosen for plausible geography and a 6-10 h endurance profile with
-at least one station-keeping segment. They are NOT operational planning data:
-they must not be used for real flight planning, and the altitudes are leg
-cruise altitudes (m AMSL) of the leg flying TO that waypoint, not terrain.
+## Route presets — `src/mission/route.ts:125-172`
+**Illustrative waypoints only.** Endpoints are real civil airfields from
+`src/data/airfields.ts`; the intermediate holds were chosen for plausible
+geography and a 6-10 h endurance profile with at least one station-keeping
+segment. They are NOT operational planning data: they must not be used for real
+flight planning, and the altitudes are leg cruise altitudes (m AMSL) of the leg
+flying TO that waypoint, not terrain. Every point is kept well inside Indian
+territory, away from the international border and the Line of Control.
 
-| Preset | Points | Cruise band | Loiter total |
-|---|---|---|---|
-| HIGH ALTITUDE — Ladakh/Leh | LEH 3500 → KARDUNG 5800/30m → DBO 6100/150m → SHYOK 5800/90m → PANOM 5500 → LEH | 3.5-6.1 km | 4 h 30 m |
-| HOT DAY — western Rajasthan | JAISALMER 300 → POKHRAN 3700/45m → BARMER 4000/90m → BAYANU 4000/60m → JAISALMER | 0.3-4.0 km | 3 h 15 m |
-| HEADWIND — Kathiawar coast | JAMNAGAR 300 → RADHANPUR 3800/30m → DIU 4000/90m → DWARKA 4200/90m → JAMNAGAR | 0.3-4.2 km | 3 h 30 m |
+| Preset | Home / dest / alternates | Points | Cruise band | Loiter total |
+|---|---|---|---|---|
+| HIGH ALTITUDE — Indus valley, Ladakh | VILH / VILH / VISR, VIJU, VICG | LEH 3256 → SHAM 5200/180m → ALCHI 5400/120m → PHEY 5000/60m → LEH | 3.3-5.4 km | 6 h |
+| HOT DAY — Thar desert, Rajasthan | VIJO / VIJR / VIBK, VIJP, VAUD, VABJ | JODHPUR 219 → THAR 3800/150m → POKHRAN 4000/120m → JAISALMER 229/90m | 0.2-4.0 km | 6 h |
+| HEADWIND — west coast | VABB / VOCI / VOGO, VOML, VAKP | MUMBAI 12 → GOA 3800 → MANGALURU 4000 → KOCHI 9 | 0.0-4.0 km | none (coastal over-water track, headwind preset carries the risk) |
 
 ## Mission profile — `src/mission/constants.ts`
 Segment sequence is takeoff → (climb/descent) → cruise → loiter → … → descent →
@@ -330,23 +332,142 @@ Verdict thresholds (`constants.ts:100-105`): GO needs P(complete) ≥ 0.90, ever
 leg ≤ 0.25 breach probability and median margin ≥ 6 kg; CAUTION needs ≥ 0.75,
 legs ≤ 0.55 and margin ≥ 0 kg; anything worse is NO-GO.
 
+## India airfield and place data — `src/data/airfields.ts`, `src/data/places.ts`
+Coordinates, names, municipalities and elevations come from the OurAirports
+open database (`airports.csv`, downloaded 2026-10-25), filtered to `type =
+civil` — no military airbase, restricted or sensitive site is listed. Elevations
+are the dataset's feet values converted at 0.3048 m/ft
+(`airfields.ts:20-21`) and are field elevations, not obstacle-limited takeoff
+alternates. Nothing is fetched at runtime; the rows are compiled in.
+
+One code in the brief does not exist in the dataset: **VAGO is not an airport**.
+Dabolim, Goa is **VOGO**, and the row carries that flag in a comment
+(`airfields.ts:39-40`). `PLACES` is a set of well-known towns and landmarks
+near the three presets, positioned from general knowledge to a few km and used
+only as map context — they carry no operational meaning
+(`places.ts:1-4`).
+
+**All of it is illustrative.** Real diversion planning needs AIP India (aerodrome
+data, runway dimensions, operating hours, approach minima, fuel and the actual
+alternate-minima rules), none of which this model has or pretends to have.
+
+## Alternate reachability — `src/nav/alternates.ts`, `src/nav/useAlternates.ts`
+The live layer answers one question: can this aircraft get to that airfield,
+right now, on the state the simulation reports.
+
+| Constant | Value | Units | Location |
+|---|---|---|---|
+| Hold-out reserve before diverting | 1800 (30 min at the current flow) | s | `alternates.ts:16` |
+| Fuel-flow smoothing window | 30 | s | `alternates.ts:18`, `store.ts:47-53` |
+| Engine-out lift-to-drag ratio | 12 | - | `alternates.ts:20` |
+| Margin that counts as comfortable | 0.20 of the requirement | - | `alternates.ts:22` |
+| Recompute cadence | 1000 | ms | `useAlternates.ts:106` |
+| Alternates for a hand-drawn route | 6 nearest civil fields | - | `useAlternates.ts:15` |
+| Foot / nautical mile | 0.3048 / 1852 | m | `units.ts:2-3` |
+
+Inputs, and why each is taken where it is:
+
+- `altM`, `sigmaRatio`, `phase`, shaft power and fuel come from the live
+  snapshot; TAS is the phase airspeed from `PHASES`, the same value the engine
+  model is being driven at (`useAlternates.ts:71-85`). The *planned* route
+  altitude is a different quantity and is never substituted for the altitude
+  the twin is actually at.
+- Wind is the mission weather cell for the leg being flown
+  (`useAlternates.ts:69`), so the HUD and the Monte Carlo see the same wind.
+- Engine life is the diagnosis RUL **P10** and only when its status is `OK`;
+  an `INSUFFICIENT_DATA` projection contributes no margin rather than a false
+  one (`useAlternates.ts:84`).
+
+Model:
+
+- Powered range = (endurance − 1800 s) × groundspeed along the bearing to the
+  field (`alternates.ts:71-75`). Endurance is fuel remaining divided by the
+  smoothed flow, so a lean, thirsty engine shortens the range even at the same
+  indicated fuel.
+- Mode selection compares the shaft power the engine is *delivering* against
+  `PWR_MARGIN_FRAC` (0.85) of the power needed to hold level flight at the
+  current density ratio (`alternates.ts:94-96`). The requirement is
+  `requiredPowerKw(phase, sigma)` from `mission.ts:44` — the same figure the
+  Monte Carlo already uses for its "Shaft Power" breach channel, deliberately
+  not a second drag polar. It is a density-ratio power law with no weight term:
+  for this airframe the mission model treats weight as a fixed fuel load, so
+  landing weight and cruise weight differ by tens of kilograms against a
+  hundred-hectowatt requirement, and a weight-sensitive polar would be precision
+  the model does not have.
+- Glide range = (altitude − field elevation) × 12, a still-air figure with no
+  allowance for anything below the aircraft (`alternates.ts:66-68`). In glide
+  the fuel state is irrelevant, which is the point of the mode.
+- Verdict uses the *binding* margin: the smaller of the range margin and the
+  RUL margin, so `FUEL`, `GLIDE` and `ENGINE LIFE` name whichever actually
+  decides the answer (`alternates.ts:101-108`).
+
+Mission Risk integration: the per-leg "Alternates in glide range" column counts
+civil fields an engine-out glide can reach from that leg's midpoint at its
+planned altitude (`MissionPanel.tsx:167-177`). It is a glide-only figure — a
+planned leg has no live fuel state, so a powered range for it would be fiction.
+At L/D 12 the glide is 45-65 km while the coastal legs are 293-425 km, so the
+column reads 1,0,0,0 on the Ladakh preset and 0 on every Rajasthan and coastal
+leg: the high-altitude preset is the *better* one, because its legs are short
+and flown at 5 km. Altitude buys range; it does not buy it across a 400 km gap.
+
+Measured on the live model (cruise, ISA+15, 5400 m, seed 1337): level power
+required 25.1 kW, the 0.85 gate 21.4 kW, healthy shaft power ~25 kW at a
+smoothed 9.5 kg/h. Turbo boost loss at severity 0.9 delivers 18.6 kW and flips
+every alternate to GLIDE, where a 5400 m glide over a 3256 m field is 26 km
+against 256 km to Srinagar, so all three read NOT REACHABLE / GLIDE.
+Compression loss at the same severity still delivers 24.6 kW and stays POWERED:
+boost is the only engine fault that reaches the glide branch in this band. A
+4 kg fuel load reads NOT REACHABLE / FUEL on every alternate.
+
 ## Map and display — `src/components/MissionMap.tsx`, `src/App.tsx`
 Basemap is the CARTO dark-matter style
-(`MissionMap.tsx:25`); it is a visual layer only, and if it has not loaded
-within 6 s the route is drawn on a vector fallback with a HUD notice
-(`:91`, `:552`) — no risk number depends on it. Route framing is computed from
-the waypoint bounds with 28 px padding and a zoom-10 ceiling rather than
-MapLibre `fitBounds`, which returns no camera when the bounds cannot fit the
-canvas (`:92-93`, `:217`). Interaction tolerances are display constants:
-waypoint squares 4.5 px half-size, 12 px hit radius, 3 px before a press
-becomes a drag, trailing track 1000 m over 12 samples (`:85-90`).
+(`MissionMap.tsx:31`); it is a visual layer only, and if it has not loaded
+within 6 s the route is drawn on a dark vector fallback with a HUD notice
+(`:144`, `:601-629`) — no risk number depends on it.
+
+Basemap layers are data of a kind the console cannot accept: the style draws
+country-level and disputed boundaries whose depiction does not match India's
+official one. Every layer whose id matches `country|border|disputed|breakaway|
+maritime` is switched to `visibility: none` after each style load, and no
+boundary line is drawn by this app (`:46`, `:553-559`). The test is id-based and
+runs on every `styledata`, so it is idempotent — the `setLayoutProperty` call
+provokes a style reload itself. The CARTO style has four boundary layers,
+`boundary_country_outline` (z6+), `boundary_country_inner` (z0+),
+`boundary_state` (z4+) and `boundary_county` (z9+); only the two country layers
+are switched off, and the state and county lines stay because they are separate
+layers, as agreed. `place_country_1` and `place_country_2` match the same test,
+so country name labels go with the lines; `place_state` and the city labels
+stay. This is a *display* filter, not a claim: the app opens on an India
+overview (centre [79, 22], zoom 4.2, `:42`) with the footer "Illustrative map.
+Boundaries not depicted."
+
+Markers are display geometry, all in pixels against the current zoom so they
+keep their size as the camera changes: waypoint squares 4.5 px half-size,
+airfield squares 4 px half-size (8 px across) with a 1 px border, the UAV dart a
+10 px span, a 12 px hit radius, 3 px of travel before a press becomes a drag,
+and a trailing track of 1000 m over 12 samples (`:137-148`). Reference places
+are drawn from zoom 5.5 and labelled only from zoom 6, because below that the
+labels collide (`:96-97`, `:148`). Route framing is computed from the waypoint
+bounds with 28 px padding and a zoom-10 ceiling rather than MapLibre `fitBounds`,
+which returns no camera when the bounds cannot fit the canvas and the
+constructor then dereferences it (`:145-146`, `:312-324`).
+
+Units: altitudes are shown as m AMSL and feet, distances as km and NM
+(`units.ts:9-16`), and the top bar carries wall-clock UTC and IST alongside the
+mission timer (`TopBar.tsx:18-30`, IST from the IANA zone `Asia/Kolkata`, not a
+hand-applied +05:30).
 
 The Live Monitor map replays the planned route on a compressed clock, cycling
-the whole mission in 600 s of wall time (`App.tsx:14`) so the marker is
+the whole mission in 600 s of wall time (`App.tsx:15`) so the marker is
 observable at the sim's own speed multipliers. Leg colours on the map and the
 swatch column in the results table both come from the single `legRiskColor`
 ramp (steel #5B8DB8 → red #C4443F, `missionStore.ts:230`, used at
-`MissionMap.tsx:154`), so they cannot disagree.
+`MissionMap.tsx:209`), so they cannot disagree. The divert line is drawn only
+while the diagnosis is off NOMINAL and takes its colour from that alternate's
+verdict (`MissionMap.tsx:250-252`, `:499-500`); the fuel-load field in the
+scenario panel (`ScenarioPanel.tsx:88-107`) writes the sim state through
+`Sim.setFuelKg` (`sim.ts:142-150`) without restarting the run, and moves the
+healthy twin with the true engine so a re-load never reads as a residual.
 
 ## Physical model — findings, not changes
 No physics was modified for M3. Two observations from wiring the mission layer
@@ -357,3 +478,15 @@ to the untouched model:
 - The governor cannot hold a segment whose load asks for a throttle outside
   `base ± govClamp`; an out-of-band row produces rpm droop that reads as a
   false power breach. Both mission schedule rows were set from this constraint.
+- The live `Sim` drives the propeller with `PHASES[phase].propC` unchanged at
+  every altitude (`sim.ts:191`), so the load it places on the engine is the
+  sea-level figure, while the alternate layer's *requirement* is
+  `requiredPowerKw(phase, sigma)` and does fall with the density ratio. The two
+  are only comparable because both are powers at the same rpm; a boost-loss
+  fault therefore shows up as a shortfall against a threshold that thins more
+  slowly than the engine does. Measured at cruise, seed 1337, no turbulence:
+  healthy delivers 44.7 kW at 0-3000 m, 43.4 kW at 4500 m, 35.0 kW at 5400 m and
+  30.2 kW at 6000 m, against requirements (0.85 x) of 38.0, 28.2, 24.1 and 21.8
+  kW. Loss of boost is the only engine fault that reaches the glide branch in
+  the sim's altitude band; compression loss alone does not. This is reported,
+  not corrected — the physical model was not touched.

@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, useMemo, type ReactNode } from 'react';
 import {
   WX_PRESET_LIST,
   ROUTE_LIST,
@@ -9,6 +9,9 @@ import {
 import { CHT_LIMIT_C, MC_MIN_RUNS, OILT_LIMIT_C } from '../mission/constants';
 import { TURB_LEVELS } from '../mission/weather';
 import type { TurbulenceLevel } from '../sim/types';
+import { AIRFIELDS } from '../data/airfields';
+import { airfieldsInGlideRange, midPointLeg } from '../nav/alternates';
+import { M_PER_NM, mToFt } from '../nav/units';
 
 // --- formatting: every value here is passed in from the store or the sim -----
 function fmtNum(n: number, digits = 1): string {
@@ -159,6 +162,19 @@ export default function MissionPanel() {
 
   // Plan figures come straight from the store's derived plan; nothing invented.
   const plan = currentPlan(waypoints, weather);
+  // Engine-out alternates reachable from each leg midpoint at its planned
+  // altitude - a glide-only figure, since a leg has no live fuel state to weigh.
+  const glideCounts = useMemo(
+    () =>
+      plan.legs.map((l, i) => {
+        const a = waypoints[i];
+        const b = waypoints[i + 1];
+        if (!a || !b) return 0;
+        const mid = midPointLeg(a, b);
+        return airfieldsInGlideRange(mid.lat, mid.lon, l.altM, AIRFIELDS).length;
+      }),
+    [plan, waypoints],
+  );
   const canRun = !mcRunning && waypoints.length >= 2;
   const progressPct = mcTotal > 0 ? Math.max(0, Math.min(100, (mcDone / mcTotal) * 100)) : 0;
 
@@ -341,9 +357,9 @@ export default function MissionPanel() {
         <div className="mt-3 border-t border-edge pt-2">
           <div className="mb-1 font-mono uppercase tracking-wide text-dim">Plan Summary</div>
           <Stat label="TOTAL MISSION TIME" value={fmtHM(plan.totalS)} />
-          <Stat label="CRUISE DISTANCE" value={`${fmtNum(plan.cruiseDistM / 1000, 0)} km`} />
+          <Stat label="CRUISE DISTANCE" value={`${fmtNum(plan.cruiseDistM / 1000, 0)} km / ${fmtNum(plan.cruiseDistM / M_PER_NM, 0)} NM`} />
           <Stat label="LOITER TIME" value={fmtHM(plan.loiterS)} />
-          <Stat label="MAX ALTITUDE" value={`${fmtNum(plan.maxAltM, 0)} m AMSL`} />
+          <Stat label="MAX ALTITUDE" value={`${fmtNum(plan.maxAltM, 0)} m / ${fmtNum(mToFt(plan.maxAltM), 0)} ft AMSL`} />
         </div>
       </Section>
 
@@ -383,11 +399,13 @@ export default function MissionPanel() {
                   <tr>
                     <th className="px-1 py-1 font-normal">Leg</th>
                     <th className="px-1 py-1 font-normal">km</th>
+                    <th className="px-1 py-1 font-normal">NM</th>
                     <th className="px-1 py-1 font-normal">min</th>
                     <th className="px-1 py-1 font-normal">Alt</th>
                     <th className="px-1 py-1 font-normal">HW</th>
                     <th className="px-1 py-1 font-normal">Risk%</th>
                     <th className="px-1 py-1 font-normal">Limiting</th>
+                    <th className="px-1 py-1 font-normal">Alternates in glide range</th>
                     <th className="px-1 py-1 font-normal">Swatch</th>
                   </tr>
                 </thead>
@@ -398,11 +416,20 @@ export default function MissionPanel() {
                         {l.fromName}&gt;{l.toName}
                       </td>
                       <td className="px-1 py-1">{fmtNum(l.distKm, 0)}</td>
+                      <td className="px-1 py-1">{fmtNum((l.distKm * 1000) / M_PER_NM, 0)}</td>
                       <td className="px-1 py-1">{fmtMin(l.timeS)}</td>
                       <td className="px-1 py-1">{fmtNum(l.altM, 0)}</td>
                       <td className="px-1 py-1">{fmtNum(l.headwindMs, 1)}</td>
                       <td className="px-1 py-1">{fmtNum(l.breachFrac * 100, 1)}</td>
                       <td className="px-1 py-1">{l.limitingChannel ?? '—'}</td>
+                      <td
+                        className={`px-1 py-1 ${
+                          glideCounts[l.index] === 0 ? 'text-red' : glideCounts[l.index] === 1 ? 'text-amber' : ''
+                        }`}
+                        title="Civil airfields an engine-out glide can reach from this leg's midpoint at its planned altitude"
+                      >
+                        {glideCounts[l.index] ?? 0}
+                      </td>
                       <td className="px-1 py-1">
                         <span
                           className="inline-block h-3 w-6 border border-edge align-middle"

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useSimStore } from '../state/store';
 import type { Phase, TurbulenceLevel } from '../sim/types';
 
@@ -10,6 +11,25 @@ function fmtClock(t: number): string {
   const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
   const ss = String(s % 60).padStart(2, '0');
   return `${hh}:${mm}:${ss}`;
+}
+
+// Wall-clock references beside the mission timer: UTC and IST (UTC+05:30).
+// These read the host clock, not the simulation (ASSUMPTIONS.md).
+function zulu(d: Date, zone: string): string {
+  return d.toLocaleTimeString('en-GB', { timeZone: zone, hour12: false });
+}
+
+function WorldClock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  return (
+    <span className="num font-mono text-dim shrink-0">
+      {zulu(now, 'UTC')}Z {zulu(now, 'Asia/Kolkata')} IST
+    </span>
+  );
 }
 
 export default function TopBar() {
@@ -28,6 +48,7 @@ export default function TopBar() {
     <div className="h-10 shrink-0 border-b border-edge bg-panel flex items-center gap-3 px-3 overflow-x-auto whitespace-nowrap">
       <span className="font-mono font-medium tracking-wide shrink-0">AEROTWIN</span>
       <span className="num font-mono text-dim shrink-0">T+ {fmtClock(snapshot?.t ?? 0)}</span>
+      <WorldClock />
 
       <div className="flex items-center gap-1 ml-2 shrink-0">
         {[1, 10, 60].map((v) => (

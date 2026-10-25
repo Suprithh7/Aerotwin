@@ -139,6 +139,16 @@ export class Sim {
     this.stuckFrozen.delete(id);
   }
 
+  /**
+   * Set the fuel load without restarting the run. The healthy twin is moved by
+   * the same amount so a re-load never reads as a residual.
+   */
+  setFuelKg(kg: number): void {
+    const v = Math.max(0, kg);
+    this.trueState.fuelKg = v;
+    this.twinState.fuelKg = v;
+  }
+
   activeFaults(): ActiveFaultInfo[] {
     return this.faults.map((f) => ({
       id: f.id,

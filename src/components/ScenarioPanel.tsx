@@ -7,6 +7,8 @@ const TURB_OPTS: TurbulenceLevel[] = ['none', 'light', 'moderate', 'severe'];
 export default function ScenarioPanel() {
   const scenario = useSimStore((s) => s.scenario);
   const setScenario = useSimStore((s) => s.setScenario);
+  const fuelLoadKg = useSimStore((s) => s.fuelLoadKg);
+  const setFuelLoad = useSimStore((s) => s.setFuelLoad);
   const snap = useSimStore((s) => s.snapshot);
 
   return (
@@ -60,7 +62,7 @@ export default function ScenarioPanel() {
           value={String(scenario.altitude)}
           onChange={(e) => setScenario({ ...scenario, altitude: Number(e.target.value) })}
         >
-          {[0, 1500, 3000, 4500].map((h) => (
+          {[0, 1500, 3000, 4500, 5400, 6000].map((h) => (
             <option key={h} value={h}>
               {h} m
             </option>
@@ -82,6 +84,32 @@ export default function ScenarioPanel() {
           <span>{snap ? snap.sigmaRatio.toFixed(3) : '--'}</span>
         </div>
       </div>
+
+      <div className="mt-3 border-t border-edge pt-2 grid grid-cols-[70px_1fr] gap-x-2 gap-y-2 items-center">
+        <span className="text-dim">fuel load</span>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            inputMode="decimal"
+            min={0}
+            step={1}
+            value={fuelLoadKg}
+            className="w-full font-mono num"
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (Number.isFinite(n)) setFuelLoad(n);
+            }}
+          />
+          <span className="num font-mono w-20 text-right">
+            {snap ? `${snap.readings.fuel.measured.toFixed(1)} kg` : '--'}
+          </span>
+        </div>
+      </div>
+      <div className="mt-1 text-dim">
+        Fuel load writes the sim state directly and does not restart the run; the
+        figure on the right is what the engine reports.
+      </div>
+
       <div className="mt-2 text-dim">
         Scenario changes restart the run (state, time and faults reset; seed kept).
       </div>

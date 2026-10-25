@@ -1,6 +1,8 @@
 // Simulation Web Worker: runs the 20 Hz model, posts UI state at 10 Hz.
 import { Sim } from './sim';
 import { HIST_WINDOW_S, SIM_DT } from './constants';
+import { Diagnoser, type Diagnosis } from '../diagnosis/diagnose';
+import { createSignatureBuilder } from '../diagnosis/signatures';
 import type { FaultSpec, HistPoint, Scenario, Snapshot } from './types';
 
 export type WorkerCommand =
@@ -9,11 +11,12 @@ export type WorkerCommand =
   | { cmd: 'pause'; value: boolean }
   | { cmd: 'step' }
   | { cmd: 'inject'; spec: Omit<FaultSpec, 'id' | 'tInject'> }
-  | { cmd: 'clear'; id: number };
+  | { cmd: 'clear'; id: number }
+  | { cmd: 'fuel'; kg: number };
 
 export type WorkerMessage =
   | { type: 'reset' }
-  | { type: 'tick'; snapshot: Snapshot; records: HistPoint[] };
+  | { type: 'tick'; snapshot: Snapshot; records: HistPoint[]; diagnosis: Diagnosis };
 
 let sim = new Sim({
   seed: 1337,
@@ -25,11 +28,18 @@ let pendingSteps = 0;
 let acc = 0;
 let needReset = false;
 
+// The signature library is seeded and scenario-fixed, so it is built once and
+// reused across resets. One base job per tick keeps the 10 Hz cadence.
+const builder = createSignatureBuilder();
+let diagnoser = new Diagnoser(builder.library);
+
 self.onmessage = (e: MessageEvent<WorkerCommand>) => {
   const m = e.data;
   switch (m.cmd) {
     case 'config':
       sim = new Sim({ seed: m.seed >>> 0, scenario: m.scenario });
+      // New residuals, so the severity history and projection start over.
+      diagnoser = new Diagnoser(builder.library);
       needReset = true;
       break;
     case 'speed':
@@ -46,6 +56,9 @@ self.onmessage = (e: MessageEvent<WorkerCommand>) => {
       break;
     case 'clear':
       sim.clearFault(m.id);
+      break;
+    case 'fuel':
+      sim.setFuelKg(m.kg);
       break;
   }
 };
@@ -88,9 +101,13 @@ setInterval(() => {
   // drop points older than the chart window
   const cutoff = snapshot.t - HIST_WINDOW_S;
   out = out.filter((r) => r.t >= cutoff);
+  if (!builder.finished) builder.step(1);
+  diagnoser.setLibrary(builder.library);
+  const diagnosis = diagnoser.update(sim.zEwmaVector(), sim.twinVector(), snapshot, builder.finished);
   (self as unknown as Worker).postMessage({
     type: 'tick',
     snapshot,
     records: out,
+    diagnosis,
   } satisfies WorkerMessage);
 }, TICK_MS);

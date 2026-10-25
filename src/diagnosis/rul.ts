@@ -4,7 +4,9 @@
 // jitter between recomputes.
 import { CHANNELS } from '../sim/constants';
 import { makeNormal, mulberry32 } from '../sim/rng';
+import { OILT_LIMIT_C } from '../mission/constants';
 import type { ChannelId } from '../sim/types';
+import type { SevTemplate } from './signatures';
 
 // --- assumptions (see ASSUMPTIONS.md) ---
 export const RUL_SAMPLE_S = 1.0; // severity history cadence, sim s
@@ -32,6 +34,7 @@ export interface EolTarget {
   channel: ChannelId;
   limit: number; // physical limit value
   sevReq: number; // severity at which the limit is reached
+  sevPerZ: number; // severity uncertainty per 1 z-unit of sensor noise on this channel
   unit: string;
   label: string;
 }
@@ -206,39 +209,69 @@ function crossing(fit: TrendFit, sevReq: number, xNow: number): number | null {
 }
 
 /**
- * End-of-life thresholds expressed as required severity, using the severity-1.0
- * signature template as the physical gain (z x noise sigma = degC / bar / kW).
- * The shaft-power floor is a fraction of the healthy (twin) power for the phase.
+ * Severity at which one channel's simulated response reaches a physical limit,
+ * interpolated over the severities the library sampled. The engine model is
+ * strongly non-linear in severity - cyl-3 cooling moves CHT +41 C at 0.3,
+ * +118 C at 0.6 and +790 C at 1.0 - so assuming proportionality through the
+ * origin would place the 230 C limit at severity 0.29 instead of 0.44.
+ * Above the sampled range the last sampled slope is used (the steepest), which
+ * is the conservative direction for a life projection.
  */
-export function eolTargets(sev1: number[], twin: number[]): EolTarget[] {
+export function sevToLimit(
+  templates: SevTemplate[],
+  index: number,
+  sigma: number,
+  twinValue: number,
+  limit: number,
+): { sevReq: number; sevPerZ: number } | null {
+  const pts = templates.map((t) => ({ s: t.severity, d: t.vec[index] * sigma }));
+  const last = pts[pts.length - 1];
+  const dir = Math.sign(last.d);
+  if (!dir) return null;
+  const prog = (v: number) => v * dir; // displacement toward the limit, positive
+  const want = prog(limit - twinValue);
+  // severity per unit of physical displacement, for the threshold uncertainty
+  const slope = (a: { s: number; d: number }, b: { s: number; d: number }) => {
+    const dd = prog(b.d) - prog(a.d);
+    return dd > 1e-12 ? (b.s - a.s) / dd : Infinity;
+  };
+  if (want <= 0) return { sevReq: 0, sevPerZ: slope(pts[0], last) * sigma };
+  if (prog(pts[0].d) >= want) {
+    return { sevReq: (pts[0].s * want) / prog(pts[0].d), sevPerZ: (pts[0].s / prog(pts[0].d)) * sigma };
+  }
+  for (let i = 1; i < pts.length; i++) {
+    const p0 = prog(pts[i - 1].d);
+    const p1 = prog(pts[i].d);
+    if (p1 >= want) {
+      const m = slope(pts[i - 1], pts[i]);
+      if (!Number.isFinite(m)) return { sevReq: pts[i].s, sevPerZ: 0 };
+      return { sevReq: pts[i - 1].s + (want - p0) * m, sevPerZ: m * sigma };
+    }
+  }
+  const m = slope(pts[pts.length - 2], last);
+  if (!Number.isFinite(m)) return null;
+  return { sevReq: last.s + (want - prog(last.d)) * m, sevPerZ: m * sigma };
+}
+
+/**
+ * End-of-life thresholds expressed as severity, from the fault's own simulated
+ * channel responses (z x noise sigma = degC / bar / kW). The shaft-power floor
+ * is a fraction of the healthy (twin) power for the phase.
+ */
+export function eolTargets(templates: SevTemplate[], twin: number[]): EolTarget[] {
   const out: EolTarget[] = [];
   for (let i = 0; i < CHANNELS.length; i++) {
     const c = CHANNELS[i];
-    const gain = sev1[i] * c.noiseSigma; // physical delta at severity 1.0
-    if (c.id.startsWith('cht')) {
-      if (gain < 1e-6) continue;
-      const need = CHT_LIMIT_C - twin[i];
-      if (need <= 0) {
-        out.push({ channel: c.id, limit: CHT_LIMIT_C, sevReq: 0, unit: c.unit, label: c.label });
-        continue;
-      }
-      out.push({ channel: c.id, limit: CHT_LIMIT_C, sevReq: need / gain, unit: c.unit, label: c.label });
-    } else if (c.id === 'oilP') {
-      if (gain > -1e-6) continue;
-      const need = twin[i] - OILP_MIN_BAR; // positive headroom
-      out.push({
-        channel: c.id,
-        limit: OILP_MIN_BAR,
-        sevReq: need / -gain,
-        unit: c.unit,
-        label: c.label,
-      });
-    } else if (c.id === 'pwr') {
-      if (gain > -1e-6) continue;
-      const floor = PWR_MIN_FRAC * twin[i];
-      const need = twin[i] - floor;
-      out.push({ channel: c.id, limit: floor, sevReq: need / -gain, unit: c.unit, label: c.label });
-    }
+    if (!Number.isFinite(twin[i])) continue;
+    let limit: number;
+    if (c.id.startsWith('cht')) limit = CHT_LIMIT_C;
+    else if (c.id === 'oilT') limit = OILT_LIMIT_C;
+    else if (c.id === 'oilP') limit = OILP_MIN_BAR;
+    else if (c.id === 'pwr') limit = PWR_MIN_FRAC * twin[i];
+    else continue;
+    const hit = sevToLimit(templates, i, c.noiseSigma, twin[i], limit);
+    if (!hit) continue;
+    out.push({ channel: c.id, limit, sevReq: hit.sevReq, sevPerZ: hit.sevPerZ, unit: c.unit, label: c.label });
   }
   return out.filter((t) => Number.isFinite(t.sevReq) && t.sevReq > 0 && t.sevReq <= 4);
 }
@@ -254,7 +287,7 @@ function quantile(sorted: number[], q: number): number {
 export interface RulInput {
   samples: RulSample[];
   tNow: number; // sim time of the latest sample
-  sev1: number[]; // severity-1.0 signature (z units)
+  templates: SevTemplate[]; // the tracked fault's sampled response curves
   twin: number[]; // twin physical channel values (CHANNELS order)
   seed?: number;
 }
@@ -283,7 +316,7 @@ export function estimateRul(input: RulInput): RulEstimate {
     };
   }
 
-  const targets = eolTargets(input.sev1, input.twin);
+  const targets = eolTargets(input.templates, input.twin);
   if (!targets.length) {
     return {
       ...INSUFFICIENT,
@@ -318,16 +351,14 @@ export function estimateRul(input: RulInput): RulEstimate {
     if (!(b > 0)) continue;
     const curve = new Array<number>(grid);
     for (let g = 0; g < grid; g++) {
-      curve[g] = Math.max(0, Math.min(1.6, sevAt(sampled, g * stepS)));
+      curve[g] = Math.max(0, Math.min(1.6, sevAt(sampled, xNow + g * stepS)));
     }
     curves.push(curve);
     let best: number | null = null;
     for (const tgt of targets) {
-      // sensor-noise uncertainty on the threshold severity
-      const idx = CHANNELS.findIndex((c) => c.id === tgt.channel);
-      const zGain = input.sev1[idx];
-      const sevJitter = zGain !== 0 ? (tgt.sevReq * normal()) / zGain : 0;
-      const req = Math.max(1e-3, tgt.sevReq + sevJitter);
+      // one z-unit of sensor noise on the channel is sevPerZ severity units of
+      // threshold uncertainty
+      const req = Math.max(1e-3, tgt.sevReq + tgt.sevPerZ * normal());
       const x = crossing(sampled, req, xNow);
       if (x === null) continue;
       const rel = x - xNow;
