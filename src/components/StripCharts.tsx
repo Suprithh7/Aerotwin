@@ -12,6 +12,12 @@ const AXIS = {
 
 const GRID = { left: 52, right: 14, top: 22, bottom: 22 };
 
+// Sim-time seconds as mm:ss, the unit every clock in the app uses.
+export function formatClock(v: number): string {
+  const s = Math.max(0, Math.round(v));
+  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
+
 function useChart(ref: React.RefObject<HTMLDivElement>) {
   const chart = useRef<echarts.ECharts | null>(null);
   useEffect(() => {
@@ -80,7 +86,13 @@ export default function StripCharts() {
         itemWidth: 10,
         itemHeight: 2,
       },
-      xAxis: { type: 'value', min: tStart, max: tEnd, ...AXIS },
+      xAxis: {
+        type: 'value',
+        min: tStart,
+        max: tEnd,
+        ...AXIS,
+        axisLabel: { ...AXIS.axisLabel, formatter: formatClock },
+      },
       yAxis: { type: 'value', scale: true, ...AXIS },
       series: [
         {
@@ -112,8 +124,21 @@ export default function StripCharts() {
       backgroundColor: 'transparent',
       grid: GRID,
       textStyle: { fontFamily: 'IBM Plex Mono' },
-      xAxis: { type: 'value', min: tStart, max: tEnd, ...AXIS },
-      yAxis: { type: 'value', scale: true, ...AXIS },
+      xAxis: {
+        type: 'value',
+        min: tStart,
+        max: tEnd,
+        ...AXIS,
+        axisLabel: { ...AXIS.axisLabel, formatter: formatClock },
+      },
+      // Keep the full +/-3 and +/-5 sigma band visible at all times; expand
+      // only when a residual actually leaves it.
+      yAxis: {
+        type: 'value',
+        min: (v: { min: number }) => Math.min(-6, v.min),
+        max: (v: { max: number }) => Math.max(6, v.max),
+        ...AXIS,
+      },
       series: [
         {
           type: 'line',
