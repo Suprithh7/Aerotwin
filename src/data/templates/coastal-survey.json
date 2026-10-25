@@ -1,0 +1,24 @@
+{
+  "id": "coastal-survey",
+  "name": "TAMIL COAST SURVEY",
+  "region": "Coromandel coast - Chennai to Kalpakkam, 180 m AGL",
+  "description": "Low-level coastal survey along the Coromandel shore, with four reconnaissance passes over the surf line. Illustrative waypoints only.",
+  "engineProfileId": "nominal",
+  "startTimeUTC": "2026-10-25T00:30:00.000Z",
+  "templateId": "coastal-survey",
+  "illustrative": true,
+  "weatherMode": "forecast",
+  "groundStation": { "lat": 12.99, "lon": 80.17 },
+  "zones": [],
+  "customSites": [
+    { "id": 1, "name": "ECR FIELD", "type": "FIELD", "lat": 12.8, "lon": 80.24, "elevM": 12 }
+  ],
+  "nodes": [
+    { "id": 1, "type": "LAUNCH", "name": "CHENNAI", "lat": 12.9941, "lon": 80.1709, "alt": 16, "altRef": "AMSL", "loiterMin": 0 },
+    { "id": 2, "type": "RECON", "name": "NEELANKARAI", "lat": 12.93, "lon": 80.26, "alt": 180, "altRef": "AGL", "loiterMin": 0 },
+    { "id": 3, "type": "RECON", "name": "MAMALLAPURAM", "lat": 12.62, "lon": 80.2, "alt": 180, "altRef": "AGL", "loiterMin": 0 },
+    { "id": 4, "type": "RECON", "name": "KALPAKKAM", "lat": 12.54, "lon": 80.13, "alt": 180, "altRef": "AGL", "loiterMin": 0 },
+    { "id": 5, "type": "RECON", "name": "MAHABALIPURAM", "lat": 12.61, "lon": 80.19, "alt": 180, "altRef": "AGL", "loiterMin": 0 },
+    { "id": 6, "type": "LAND", "name": "CHENNAI", "lat": 12.9941, "lon": 80.1709, "alt": 16, "altRef": "AMSL", "loiterMin": 0 }
+  ]
+}

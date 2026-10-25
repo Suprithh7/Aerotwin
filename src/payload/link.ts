@@ -1,8 +1,8 @@
-// Simulated line-of-sight datalink to the preset's ground station. The radio
+// Simulated line-of-sight datalink to the mission's ground station. The radio
 // horizon is a smooth-earth approximation and terrain masking is not modelled
 // (see README/ASSUMPTIONS). Jamming is modelled as an absolute loss of rate.
 import { distanceM } from '../mission/route';
-import type { GroundStation } from '../data/zones';
+import type { GroundStation } from '../mission/types';
 import type { LinkStatus } from './types';
 
 // --- assumptions (see ASSUMPTIONS.md) ---

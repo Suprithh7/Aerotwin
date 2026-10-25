@@ -1,69 +1,27 @@
-// Reconnaissance points of interest: five fixed sites per route preset, close
-// to a hold or a waypoint. Sizes and priorities come from a per-preset seed so
-// every rehearsal of a preset collects the same manifest (ASSUMPTIONS.md).
+// Reconnaissance points of interest derived from the mission's RECON nodes.
+// A RECON node is the survey target: its name is the anchor in the manifest and
+// its position is the site. Sizes, types and priorities are seeded from the
+// mission and node ids so every rehearsal of a mission collects the same items
+// (ASSUMPTIONS.md).
 import { distanceM } from '../mission/route';
 import { positionAtClock, type MissionPlan } from '../mission/mission';
 import type { Waypoint } from '../mission/route';
+import type { Mission } from '../mission/types';
 import { mulberry32 } from '../sim/rng';
-import type {
-  PayloadPriority,
-  PayloadType,
-  PoiSpec,
-  ScheduledPoi,
-} from './types';
+import type { PayloadPriority, PayloadType, PoiSpec, ScheduledPoi } from './types';
 
 /** The aircraft captures an item the first time it comes this close. */
 export const CAPTURE_RADIUS_M = 3000;
 const CAPTURE_SAMPLE_S = 5;
 
-interface PoiAnchor {
-  type: PayloadType;
-  baseMB: number;
-  priority: PayloadPriority;
-  lat: number;
-  lon: number;
-  anchor: string;
+function hashString(text: string): number {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h >>> 0;
 }
-
-interface PresetSeed {
-  seed: number;
-  anchors: PoiAnchor[];
-}
-
-const POI_SEEDS: Record<string, PresetSeed> = {
-  ladakh: {
-    seed: 0x1a2b3c,
-    anchors: [
-      { type: 'VIDEO', baseMB: 600, priority: 1, lat: 34.118, lon: 77.104, anchor: 'SHAM' },
-      { type: 'IMAGE', baseMB: 58, priority: 3, lat: 34.113, lon: 77.096, anchor: 'SHAM' },
-      { type: 'IMAGE', baseMB: 44, priority: 2, lat: 34.127, lon: 76.795, anchor: 'ALCHI' },
-      { type: 'VIDEO', baseMB: 260, priority: 2, lat: 34.122, lon: 76.788, anchor: 'ALCHI' },
-      { type: 'IMAGE', baseMB: 36, priority: 3, lat: 34.112, lon: 77.44, anchor: 'PHEY' },
-    ],
-  },
-  rajasthan: {
-    seed: 0x2b3c4d,
-    anchors: [
-      { type: 'VIDEO', baseMB: 480, priority: 1, lat: 26.68, lon: 72.16, anchor: 'THAR' },
-      { type: 'IMAGE', baseMB: 52, priority: 3, lat: 26.705, lon: 72.147, anchor: 'THAR' },
-      { type: 'VIDEO', baseMB: 340, priority: 2, lat: 26.835, lon: 71.536, anchor: 'POKHRAN' },
-      { type: 'IMAGE', baseMB: 27, priority: 3, lat: 26.831, lon: 71.531, anchor: 'POKHRAN' },
-      { type: 'IMAGE', baseMB: 60, priority: 3, lat: 26.887, lon: 70.868, anchor: 'JAISALMER' },
-    ],
-  },
-  coastal: {
-    seed: 0x3c4d5e,
-    anchors: [
-      { type: 'VIDEO', baseMB: 520, priority: 1, lat: 15.382, lon: 73.835, anchor: 'GOA' },
-      { type: 'IMAGE', baseMB: 33, priority: 3, lat: 15.378, lon: 73.831, anchor: 'GOA' },
-      { type: 'VIDEO', baseMB: 410, priority: 2, lat: 12.956, lon: 74.889, anchor: 'MANGALURU' },
-      { type: 'IMAGE', baseMB: 49, priority: 2, lat: 12.952, lon: 74.884, anchor: 'MANGALURU' },
-      { type: 'IMAGE', baseMB: 41, priority: 3, lat: 10.153, lon: 76.403, anchor: 'KOCHI' },
-    ],
-  },
-};
-
-const cache = new Map<string, PoiSpec[]>();
 
 function clampSize(type: PayloadType, mb: number): number {
   const lo = type === 'IMAGE' ? 15 : 150;
@@ -71,31 +29,39 @@ function clampSize(type: PayloadType, mb: number): number {
   return Math.round(Math.max(lo, Math.min(hi, mb)));
 }
 
+function priorityOf(roll: number): PayloadPriority {
+  if (roll < 0.28) return 1;
+  if (roll < 0.76) return 2;
+  return 3;
+}
+
 /**
- * Deterministic manifest. The seed only varies the nominal size (+/-10 %) and a
- * sub-kilometre position offset, so every run of a preset sees the same items.
+ * Deterministic manifest: one item per RECON node, in route order. The seeded
+ * roll only varies the type, nominal size (+/-10 %), priority and a
+ * sub-kilometre offset, so a mission always sees the same items.
  */
-export function poisForPreset(presetId: string): PoiSpec[] {
-  const cached = cache.get(presetId);
-  if (cached) return cached;
-  const seed = POI_SEEDS[presetId];
-  if (!seed) return [];
-  const rng = mulberry32(seed.seed);
-  const pois = seed.anchors.map((a, i) => {
-    const lat = a.lat + (rng() - 0.5) * 0.006;
-    const lon = a.lon + (rng() - 0.5) * 0.006;
-    return {
+export function poisForMission(mission: Mission): PoiSpec[] {
+  const nodes = mission.nodes.filter((n) => n.type === 'RECON');
+  const seedBase = `${mission.templateId ?? mission.id}:${mission.id}`;
+  const out: PoiSpec[] = [];
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    const rng = mulberry32(hashString(`${seedBase}:${node.id}:${node.name}`));
+    const type: PayloadType = rng() < 0.55 ? 'VIDEO' : 'IMAGE';
+    const baseMB = type === 'VIDEO' ? 280 + rng() * 300 : 28 + rng() * 34;
+    const lat = node.lat + (rng() - 0.5) * 0.004;
+    const lon = node.lon + (rng() - 0.5) * 0.004;
+    out.push({
       id: i + 1,
-      type: a.type,
-      sizeMB: clampSize(a.type, a.baseMB * (0.9 + rng() * 0.2)),
-      priority: a.priority,
+      type,
+      sizeMB: clampSize(type, baseMB * (0.9 + rng() * 0.2)),
+      priority: priorityOf(rng()),
       lat,
       lon,
-      anchor: a.anchor,
-    } satisfies PoiSpec;
-  });
-  cache.set(presetId, pois);
-  return pois;
+      anchor: node.name,
+    });
+  }
+  return out;
 }
 
 /**

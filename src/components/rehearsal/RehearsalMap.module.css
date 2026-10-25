@@ -1,24 +1,35 @@
-.wrap {
+.frame {
   position: relative;
   width: 100%;
-  height: 100%;
   overflow: hidden;
-  background: #0b0d10;
+  background: var(--paper);
+}
+
+.wrap {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--paper);
   outline: none;
+}
+
+/* Chart-sheet registration ticks are hidden in the dark console theme. */
+.tick {
+  display: none;
 }
 
 .label {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 1px 4px;
+  padding: 1px 5px;
   background-color: rgb(11 13 16 / 0.72);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 10px;
   line-height: 13px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #d7dee7;
+  color: var(--txt);
   white-space: nowrap;
   user-select: none;
   pointer-events: none;
@@ -26,31 +37,25 @@
 
 .home,
 .dest {
-  color: #5b8db8;
-}
-
-.home::before,
-.dest::before,
-.alt::before {
-  content: '';
-  width: 5px;
-  height: 5px;
-  flex: 0 0 5px;
-  border: 1px solid #5b8db8;
-  background: #11151a;
+  color: var(--steel);
 }
 
 .home::before,
 .dest::before {
-  background: #5b8db8;
+  content: '';
+  width: 5px;
+  height: 5px;
+  flex: 0 0 5px;
+  border: 1px solid var(--steel);
 }
 
-.alt {
-  color: #93a0b0;
+.home::before,
+.dest::before {
+  background: var(--steel);
 }
 
 .ground {
-  color: #5e9c9a;
+  color: var(--data);
 }
 
 .ground::before {
@@ -58,39 +63,95 @@
   width: 6px;
   height: 6px;
   flex: 0 0 6px;
-  border: 1px solid #5e9c9a;
+  border: 1px solid var(--data);
   transform: rotate(45deg);
-  background: #11151a;
+  background: var(--sheet);
 }
 
 .denied {
   padding: 2px 5px;
   border: 1px solid rgb(196 68 63 / 0.65);
   background-color: rgb(17 21 26 / 0.88);
-  color: #c4443f;
-  font-size: 10px;
+  color: var(--red);
+}
+
+.restricted {
+  padding: 2px 5px;
+  border: 1px solid rgb(201 146 46 / 0.65);
+  background-color: rgb(17 21 26 / 0.88);
+  color: var(--amber);
+}
+
+.site {
+  color: var(--dim);
+}
+
+.site::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  flex: 0 0 5px;
+  border: 1px solid var(--dim);
+  transform: rotate(45deg);
 }
 
 /* Numbered waypoint dots. The altitude appears only on hover or selection. */
 .wp {
-  position: relative;
+  display: grid;
+  place-items: center;
   width: 17px;
   height: 17px;
-  border-radius: 50%;
-  border: 1px solid #5b8db8;
-  background-color: rgb(17 21 26 / 0.92);
-  color: #5e9c9a;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 10px;
-  line-height: 15px;
-  text-align: center;
   cursor: pointer;
   user-select: none;
 }
 
-.wp.sel {
-  border-color: #c9922e;
-  color: #d7dee7;
+.wp::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: rgb(17 21 26 / 0.92);
+  border: 1px solid var(--steel);
+}
+
+.editor .wp {
+  cursor: grab;
+}
+
+.launch::before {
+  background: var(--steel);
+}
+
+.launch .wpNum {
+  color: var(--bg);
+}
+
+.land::before {
+  border-width: 2px;
+}
+
+.loiter::before {
+  border-style: dashed;
+}
+
+.wp.sel::before {
+  border-color: var(--amber);
+}
+
+.wp:hover::before {
+  background: var(--edge);
+}
+
+.launch.wp:hover::before {
+  background: var(--steel);
+}
+
+.wpNum {
+  position: relative;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--data);
 }
 
 .wpAlt {
@@ -100,9 +161,10 @@
   bottom: 20px;
   transform: translateX(-50%);
   padding: 1px 5px;
-  border: 1px solid #232a33;
+  border: 1px solid var(--edge);
   background-color: rgb(17 21 26 / 0.94);
-  color: #d7dee7;
+  color: var(--txt);
+  font-family: 'IBM Plex Mono', monospace;
   font-size: 10px;
   line-height: 14px;
   white-space: nowrap;
@@ -114,14 +176,95 @@
   display: block;
 }
 
+/* Leg midpoint insert handle. */
+.insert {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--steel);
+  background-color: var(--panel);
+  color: var(--steel);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  line-height: 12px;
+  text-align: center;
+  cursor: pointer;
+  opacity: 0.65;
+  user-select: none;
+}
+
+.insert:hover {
+  opacity: 1;
+  background-color: var(--edge);
+}
+
+/* Zone vertex handle. */
+.vertex {
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--red);
+  background-color: var(--panel);
+  cursor: grab;
+  user-select: none;
+}
+
+/* Ground station: square with a crosshair. */
+.groundMarker {
+  width: 10px;
+  height: 10px;
+  border: 1px solid var(--data);
+  background-color: var(--panel);
+  cursor: grab;
+  user-select: none;
+}
+
+.groundMarker::before,
+.groundMarker::after {
+  content: '';
+  position: absolute;
+  background: var(--data);
+}
+
+.groundMarker::before {
+  left: 50%;
+  top: -4px;
+  bottom: -4px;
+  width: 1px;
+}
+
+.groundMarker::after {
+  top: 50%;
+  left: -4px;
+  right: -4px;
+  height: 1px;
+}
+
+.siteMarker {
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--dim);
+  border-radius: 50%;
+  background-color: var(--panel);
+  cursor: grab;
+  user-select: none;
+}
+
+.siteMarker.sel {
+  border: 2px solid var(--amber);
+}
+
+.crosshair :global(.maplibregl-canvas) {
+  cursor: crosshair;
+}
+
 /* MapLibre chrome: only the compact attribution is kept, and it is flat. */
 .wrap :global(.maplibregl-ctrl-attrib) {
+  margin: 0 8px 20px 0;
+  border: 1px solid var(--edge);
+  border-radius: 0;
+  background-color: rgb(17 21 26 / 0.88);
   font-family: 'IBM Plex Mono', monospace;
   font-size: 9px;
-  color: #93a0b0;
-  background-color: rgb(17 21 26 / 0.88);
-  border: 1px solid #232a33;
-  border-radius: 0;
+  color: var(--dim);
 }
 
 .wrap :global(.maplibregl-ctrl-attrib-inner) {
@@ -129,7 +272,7 @@
 }
 
 .wrap :global(.maplibregl-ctrl-attrib a) {
-  color: #5b8db8;
+  color: var(--steel);
   text-decoration: none;
 }
 

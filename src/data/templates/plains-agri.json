@@ -1,0 +1,24 @@
+{
+  "id": "plains-agri",
+  "name": "PUNJAB AGRI SURVEY",
+  "region": "Punjab plains around Ludhiana - 120 m AGL",
+  "description": "Low-level agricultural survey over irrigated plains, with four reconnaissance lines and no restricted geography. Illustrative waypoints only.",
+  "engineProfileId": "nominal",
+  "startTimeUTC": "2026-10-25T01:30:00.000Z",
+  "templateId": "plains-agri",
+  "illustrative": true,
+  "weatherMode": "forecast",
+  "groundStation": { "lat": 30.86, "lon": 75.95 },
+  "zones": [],
+  "customSites": [
+    { "id": 1, "name": "LUDHIANA FARM STRIP", "type": "FIELD", "lat": 30.82, "lon": 75.9, "elevM": 245 }
+  ],
+  "nodes": [
+    { "id": 1, "type": "LAUNCH", "name": "LUDHIANA", "lat": 30.8547, "lon": 75.9526, "alt": 255, "altRef": "AMSL", "loiterMin": 0 },
+    { "id": 2, "type": "RECON", "name": "SURVEY NORTH", "lat": 30.98, "lon": 75.86, "alt": 120, "altRef": "AGL", "loiterMin": 0 },
+    { "id": 3, "type": "RECON", "name": "SURVEY WEST", "lat": 30.9, "lon": 75.66, "alt": 120, "altRef": "AGL", "loiterMin": 0 },
+    { "id": 4, "type": "RECON", "name": "SURVEY SOUTH", "lat": 30.75, "lon": 75.74, "alt": 120, "altRef": "AGL", "loiterMin": 0 },
+    { "id": 5, "type": "RECON", "name": "SURVEY EAST", "lat": 30.88, "lon": 76.08, "alt": 120, "altRef": "AGL", "loiterMin": 0 },
+    { "id": 6, "type": "LAND", "name": "LUDHIANA", "lat": 30.8547, "lon": 75.9526, "alt": 255, "altRef": "AMSL", "loiterMin": 0 }
+  ]
+}

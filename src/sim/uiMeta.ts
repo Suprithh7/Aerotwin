@@ -13,7 +13,9 @@ export const CYLINDER_FAULTS_SET = new Set([
   'compression',
 ]);
 
-const STEEL: [number, number, number] = [91, 141, 184];
+import { C } from '../ui/theme';
+
+const NOMINAL: [number, number, number] = [91, 141, 184];
 const AMBER: [number, number, number] = [201, 146, 46];
 const RED: [number, number, number] = [196, 68, 63];
 
@@ -26,7 +28,7 @@ function mix(a: [number, number, number], b: [number, number, number], f: number
 }
 
 /**
- * Thermal ramp anchored to the channel's own bands: blue-grey through the
+ * Thermal ramp anchored to the channel's own bands: steel through the
  * nominal range, blending toward amber as the caution band approaches, amber
  * across caution, and red only at the limit (or above it).
  */
@@ -36,10 +38,12 @@ export function thermalColor(
   cautionC: number,
   limitC: number,
 ): string {
-  if (value <= nominalC) return rgb(STEEL);
+  if (value <= nominalC) return rgb(NOMINAL);
   if (value >= limitC) return rgb(RED);
   if (value <= cautionC) {
-    return mix(STEEL, AMBER, (value - nominalC) / (cautionC - nominalC));
+    return mix(NOMINAL, AMBER, (value - nominalC) / (cautionC - nominalC));
   }
   return mix(AMBER, RED, (value - cautionC) / (limitC - cautionC));
 }
+
+export const THERMAL_EMPTY = C.rule;

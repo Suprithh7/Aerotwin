@@ -283,30 +283,24 @@ Track sampling for the marker is 24 straight-line samples per leg
 (`route.ts:191`); the marker position interpolates that polyline, so it follows
 the drawn route rather than a recomputed great circle.
 
-## Route presets — `src/mission/route.ts:125-172`
-**Illustrative waypoints only.** Endpoints are real civil airfields from
-`src/data/airfields.ts`; the intermediate holds were chosen for plausible
-geography and a 6-10 h endurance profile with at least one station-keeping
-segment. They are NOT operational planning data: they must not be used for real
-flight planning, and the altitudes are leg cruise altitudes (m AMSL) of the leg
-flying TO that waypoint, not terrain. Every point is kept well inside Indian
-territory, away from the international border and the Line of Control.
+## Route presets — superseded by editable mission templates
+The M3 fixed presets and the ±2° edit lock were removed in the mission-editor
+release. The three original exercise routes were migrated into
+`src/data/templates/*.json` in the same schema as a hand-drawn mission, joined
+by two civil survey examples. Waypoints, zones, sites, ground station, start
+time and name now all come from the Mission object; there is no preset bounding
+box or route lock. See "Mission editor" below for the data model, limits and
+the Ladakh terrain waypoints. **All geography remains illustrative.**
 
-| Preset | Home / dest / alternates | Points | Cruise band | Loiter total |
-|---|---|---|---|---|
-| HIGH ALTITUDE — Indus valley, Ladakh | VILH / VILH / VISR, VIJU, VICG | LEH 3256 → SHAM 5200/180m → ALCHI 5400/120m → PHEY 5000/60m → LEH | 3.3-5.4 km | 6 h |
-| HOT DAY — Thar desert, Rajasthan | VIJO / VIJR / VIBK, VIJP, VAUD, VABJ | JODHPUR 219 → THAR 3800/150m → POKHRAN 4000/120m → JAISALMER 229/90m | 0.2-4.0 km | 6 h |
-| HEADWIND — west coast | VABB / VOCI / VOGO, VOML, VAKP | MUMBAI 12 → GOA 3800 → MANGALURU 4000 → KOCHI 9 | 0.0-4.0 km | none (coastal over-water track, headwind preset carries the risk) |
+The five bundled templates are:
 
-### Hand-edited routes — `src/mission/route.ts:187-219`, `src/mission/missionStore.ts:122-177`
-Presets open **locked**: add, move, delete, altitude and loiter edits are
-ignored until EDIT ROUTE is switched on. Selecting a preset or pressing RESET
-PRESET locks the route again; RESET PRESET reinstates the preset the route was
-last based on. New and dragged waypoints are clamped to that preset's waypoint
-bounding box expanded by **±2° on each side** (`PRESET_EDIT_MARGIN_DEG = 2`,
-`route.ts:187`), and a transient amber toast reports any clamp. The box is a
-safety rail that keeps a hand-edited route in the preset's region; it is not
-operational airspace and does not model terrain or borders.
+| Template id | Name | Character |
+|---|---|---|
+| `ladakh` | Ladakh Valley Recon | Indus valley, 3.3-5.4 km AMSL, three holds |
+| `rajasthan` | Thar Desert Transit | Jodhpur to Jaisalmer, hot high-density-altitude holds |
+| `coastal` | West Coast Transit | Mumbai to Kochi, southbound headwind |
+| `plains-agri` | Punjab Agri Survey | Ludhiana plains, 120 m AGL survey lines |
+| `coastal-survey` | Tamil Coast Survey | Chennai to Kalpakkam, 180 m AGL coastal passes |
 
 ## Mission profile — `src/mission/constants.ts`
 Segment sequence is takeoff → (climb/descent) → cruise → loiter → … → descent →
@@ -340,7 +334,7 @@ Two schedule constraints are assumptions in their own right:
 
 - The loads are capped at about 55 kW peak, roughly 75 % of the 75 kW class
   rating, rather than at the live sim's 74.6 kW reference takeoff power. The
-  cap is a **planning** choice: it keeps every preset flyable with thermal
+  cap is a **planning** choice: it keeps every template flyable with thermal
   margin so weather and degradation, not raw rated power, produce the risk
   separation the Monte Carlo is meant to show. The recalibrated cooling model
   can sustain more at field elevation; the mission schedule was left unchanged
@@ -357,7 +351,7 @@ crank is still explicit Euler and its mechanical time constant is ~0.3 s, so
 the step cannot go much coarser without the rpm state ringing; the first-order
 thermal states use the model's analytic step and are stable at any dt. This is
 the documented response to the runtime target: at 0.25 s, 200 runs take
-**3.7 s wall on 4 workers** (measured in-app, seed 1337, HIGH ALTITUDE preset),
+**3.7 s wall on 4 workers** (measured in-app, seed 1337, Ladakh template),
 so no further reduction was needed.
 
 ## Mission limits — `src/sim/limits.ts`, `src/mission/constants.ts`
@@ -389,23 +383,24 @@ this atmosphere: density altitude gains only ~10 m per °C of ISA deviation at
 standard day and 6287 m at +18 °C — inside the limit planned, breached by a
 minority of the Monte Carlo draws.
 
-## Weather model — `src/mission/weather.ts`, `src/mission/constants.ts`
-Presets are authored for up to 6 waypoints and clamp to the last entry beyond
-that (`weather.ts:25`, `:75`):
+## Weather model — mission editor release (October 2026)
+Weather is fetched **per mission node** from the Open-Meteo hourly forecast
+(`https://api.open-meteo.com/v1/forecast`, temperature_2m, wind_speed_10m,
+wind_direction_10m, wind_gusts_10m, m/s) for the hour containing
+`startTimeUTC`. The mission start is stored as an ISO instant and edited in IST
+(UTC+5:30); the default is the next whole IST hour. A route, start-time or
+weather-mode edit re-fetches after a **1.5 s debounce** and supersedes any
+request still in flight.
 
-| Preset | ISA dev (°C) | wind dir (°) | wind (m/s) | gust (m/s) | turbulence |
-|---|---|---|---|---|---|
-| STANDARD DAY | 0/3/5/3/0/0 | 240-250 | 4-6 | 6-10 | light, moderate at index 3 |
-| HOT AND HIGH | 12/15/18/16/12/10 | 210-250 | 6-10 | 10-17 | light → severe |
-| HEADWIND + TURBULENCE | 5-8 | each point opposes its outbound leg | 12-16 | 19-26 | severe |
+Each node keeps a source tag shown in the editor: **LIVE** (forecast),
+**MANUAL** (a per-node override is applied) or **FALLBACK** (bundled default:
+0 °C ISA deviation, 5 m/s wind, light turbulence). The weather panel always
+shows `n LIVE / n MAN / n FB`; if every node falls back it also shows
+`FORECAST UNAVAILABLE - USING FALLBACK WEATHER`. A manual override is keyed to
+the node id, so moving or reordering the node keeps it. Failure is per node:
+the fallback is silent apart from the small notice, and `fetchOne` never throws.
 
-The HEADWIND preset is a worst-case construction (wind set against each leg's
-bearing, `weather.ts:58-61`), not a synoptic pattern.
-
-Live weather is read from Open-Meteo
-(`https://api.open-meteo.com/v1/forecast`, current temperature_2m,
-wind_speed_10m, wind_direction_10m, wind_gusts_10m, m/s — `weather.ts:125`,
-`:198-201`). Two derivations are engineering assumptions:
+Two derivations are engineering assumptions:
 
 - **ISA deviation from a station reading**: `isaDev = T₂ₘ − T_ISA(ground
   elevation)`, with the standard atmosphere at 6.5 K/km from 15 °C
@@ -420,12 +415,9 @@ wind_speed_10m, wind_direction_10m, wind_gusts_10m, m/s — `weather.ts:125`,
   qualitative band assignment, not a scaled intensity.
 
 Caching: memory plus `localStorage` under `aerotwin.wx.v1`, keyed to the
-coordinate rounded to 0.01°, TTL 30 min (`weather.ts:126-134`). Failure is
-per-cell: a point that cannot be fetched keeps its preset values and reports
-`PARTIAL LIVE WEATHER: n/m POINTS…`; if nothing comes back the notice is
-`LIVE WEATHER UNAVAILABLE - USING PRESET VALUES` (`weather.ts:253-258`).
-`fetchOne` never throws (`weather.ts:194`), so a network failure cannot take
-the app down.
+coordinate rounded to 0.01°, TTL 30 min. A cached cell is re-tagged LIVE when
+reused. Nothing about the fetch is allowed to take the app down: a failed node
+becomes FALLBACK, and the pre-flight WEATHER check still uses the fallback cell.
 
 Weather reaches the engine only through the existing sim inputs: ISA deviation
 → OAT and density altitude in `atmosphere()`, wind → groundspeed and therefore
@@ -493,24 +485,76 @@ Verdict thresholds (`constants.ts:100-105`): GO needs P(complete) ≥ 0.90, ever
 leg ≤ 0.25 breach probability and median margin ≥ 6 kg; CAUTION needs ≥ 0.75,
 legs ≤ 0.55 and margin ≥ 0 kg; anything worse is NO-GO.
 
-## India airfield and place data — `src/data/airfields.ts`, `src/data/places.ts`
-Coordinates, names, municipalities and elevations come from the OurAirports
-open database (`airports.csv`, downloaded 2026-10-25), filtered to `type =
-civil` — no military airbase, restricted or sensitive site is listed. Elevations
-are the dataset's feet values converted at 0.3048 m/ft
-(`airfields.ts:20-21`) and are field elevations, not obstacle-limited takeoff
-alternates. Nothing is fetched at runtime; the rows are compiled in.
+## India airfield data — mission editor release (October 2026)
+`src/data/airfields.json` is a one-time download of the OurAirports
+`airports.csv` on 2026-10-25, filtered to `iso_country = IN` and
+`type in {large_airport, medium_airport, small_airport, heliport}`. After the
+name exclusions below the bundle holds **583** fields. Nothing is fetched at
+runtime; the rows are compiled into the app.
+
+Name heuristic (case-insensitive substring on the airport name): exclude
+`Air Force`, `AFS`, `Air Base`, `Military`, `Naval`, `Army`. This documented
+heuristic is not an airspace or ownership check: a civil-looking name can still
+be sensitive, and a military field with a civil name would survive. The full
+list of the **41** excluded names:
+
+```
+Agra Airport / Agra Air Force Station
+Ambala Air Force Station
+Army Hospital Leh Heliport
+Awantipura Air Force Station
+Bakshi Ka Talab Air Force Station
+Bareilly Air Force Station
+Barrackpore Air Force Station
+Bhatinda Air Force Station
+Bidar Airport / Bidar Air Force Station
+Bihta Air Force Station
+Car Nicobar Air Force Base
+Chabua Air Force Station
+Chennai Military Hospital Helipad
+Coimbatore Air Force Station
+Cuttack Airport / Charbatia Air Force Station
+Dinjan Air Force Station
+Dundigul Air Force Academy
+Hashimara Air Force Station
+Hindon Airport / Hindon Air Force Station
+INS Garuda / Willingdon Island Naval Air Station
+INS Rajali / Arakkonam Naval Air Station
+Indian Naval Academy Heliport
+Kharagpur Airport / Kalaikunda Air Force Station
+Naliya Air Force Station
+Panagarh Air Force Station
+Phalodi Air Force Station
+Prayagraj Army Helipad
+Ramnad Naval Air Station
+STC BSF Indian Army Helipad
+Sarsawa Air Force Station
+Sevoke Road Indian Army Heliport
+Shikra Naval Helibase
+Shillong Indian Army Helipad
+Sirsa Air Force Station
+Surichua Air Base
+Tambaram Air Force Station
+Tawang Air Force Station
+Thanjavur Air Force Station
+Udhampur Air Force Station
+Upper Tadong Indian Army Helipad
+Yelahanka Air Force Station
+```
+
+Coordinates and elevations are the dataset values (feet converted to metres at
+0.3048) and are field elevations, not obstacle-limited takeoff alternates.
+They are illustrative for this prototype and must be verified against AIP India
+before real use. Runway dimensions, operating hours, approach and
+alternate-minima rules, fuel availability and airspace are not modelled.
 
 One code in the brief does not exist in the dataset: **VAGO is not an airport**.
 Dabolim, Goa is **VOGO**, and the row carries that flag in a comment
-(`airfields.ts:39-40`). `PLACES` is a set of well-known towns and landmarks
-near the three presets, positioned from general knowledge to a few km and used
-only as map context — they carry no operational meaning
-(`places.ts:1-4`).
+(`airfields.ts`). `src/data/places.ts` remains a list of well-known towns and
+landmarks used only as map context; it carries no operational meaning.
 
-**All of it is illustrative.** Real diversion planning needs AIP India (aerodrome
-data, runway dimensions, operating hours, approach minima, fuel and the actual
-alternate-minima rules), none of which this model has or pretends to have.
+**All of it is illustrative.** Real diversion planning needs AIP India, which
+this model does not have or pretend to have.
 
 ## Alternate reachability — `src/nav/alternates.ts`, `src/nav/useAlternates.ts`
 The live layer answers one question: can this aircraft get to that airfield,
@@ -523,7 +567,7 @@ right now, on the state the simulation reports.
 | Engine-out lift-to-drag ratio | 12 | - | `alternates.ts:20` |
 | Margin that counts as comfortable | 0.20 of the requirement | - | `alternates.ts:22` |
 | Recompute cadence | 1000 | ms | `useAlternates.ts:106` |
-| Alternates for a hand-drawn route | 6 nearest civil fields | - | `useAlternates.ts:15` |
+| Alternate field set | all bundled fields + mission sites within 400 km, nearest first | m | `useAlternates.ts:16`, `:36` |
 | Foot / nautical mile | 0.3048 / 1852 | m | `units.ts:2-3` |
 
 Inputs, and why each is taken where it is:
@@ -562,14 +606,20 @@ Model:
   RUL margin, so `FUEL`, `GLIDE` and `ENGINE LIFE` name whichever actually
   decides the answer (`alternates.ts:101-108`).
 
+The mission editor's nearest-landing layer considers every bundled airfield plus
+the mission's custom landing sites within **400 km** of the UAV, nearest first
+(`useAlternates.ts:16`, `:36`). The pre-flight ALTERNATES check uses the same
+field set and tests engine-out glide reachability from each leg midpoint
+(`preflight.ts`).
+
 Mission Risk integration: the per-leg "Alternates in glide range" column counts
 civil fields an engine-out glide can reach from that leg's midpoint at its
-planned altitude (`MissionPanel.tsx:167-177`). It is a glide-only figure — a
-planned leg has no live fuel state, so a powered range for it would be fiction.
-At L/D 12 the glide is 45-65 km while the coastal legs are 293-425 km, so the
-column reads 1,0,0,0 on the Ladakh preset and 0 on every Rajasthan and coastal
-leg: the high-altitude preset is the *better* one, because its legs are short
-and flown at 5 km. Altitude buys range; it does not buy it across a 400 km gap.
+planned altitude (`MissionPanel.tsx`). It is a glide-only figure — a planned leg
+has no live fuel state, so a powered range for it would be fiction.
+At L/D 12 the glide is only 45-65 km from a 5 km cruise, while transit legs are
+hundreds of kilometres, so most long legs read zero. The high-altitude template
+is the *better* case for this column because its survey legs are short and flown
+at 5 km. Altitude buys range; it does not buy it across a 400 km gap.
 
 Measured on the live model (cruise, ISA+15, 5400 m, seed 1337): level power
 required 25.1 kW, the 0.85 gate 21.4 kW, healthy shaft power ~25 kW at a
@@ -688,17 +738,16 @@ default healthy engine. Each card injects when the mission clock reaches
 the compressed simulation clock.
 - **NORMAL FLIGHT** - no fault (`scripts.ts:16-23`).
 - **COOLING OVER DENIED AREA** - engine `cooling`, cylinder **3**, severity
-  **0.6**, ramp **30 s**, trigger **0** (`scripts.ts:24-38`). The twin flags
-  about 32 sim s after injection (mission ~1 h 50 min) while the aircraft holds
-  over SHAM inside the denied area. The measured CHT stays below the 135 °C
-  limit through the rehearsal.
-- **FAILURE + LINK JAMMED** - the same fault with `jam: true` from the start
-  (`scripts.ts:39-55`). The guard erases at detection; no item is ever sent.
+  **0.6**, ramp **30 s**, trigger **0** (`scripts.ts`). The twin flags about
+  32 sim s after injection (mission ~1 h 50 min); on the Ladakh template that
+  detection point is inside the exercise denied area. The measured CHT stays
+  below the 135 °C limit through the rehearsal.
+- **FAILURE + LINK JAMMED** - the same fault with `jam: true` from the start.
+  The guard erases at detection; no item is ever sent.
 - **FAILURE OVER FRIENDLY AREA** - the same fault injected at **57 %** of the
-  route (`scripts.ts:56-70`), in the ALCHI hold. Detection happens about
-  1 h 50 min later over PHEY, after the aircraft has left the denied area, and
-  a friendly alternate is reachable; the guard stays in STANDBY and does not
-  erase.
+  route, intended to be after the aircraft has left the denied area. When a
+  friendly alternate is reachable, the guard stays in STANDBY and does not
+  erase. The actual outcome depends on the current mission's geometry.
 - **SENSOR GLITCH** - sensor `drift`, CHT 1, severity **0.5**, ramp **10 s**,
   trigger **0.2**, flagged as `sensorOnly` (`scripts.ts:71-83`). Its measured
   offset peaks around 21-24 °C, below the 135 °C CHT limit, so the rehearsal
@@ -770,12 +819,11 @@ is invented to fill that gap.
   ground station and the denied area (`:641-690`), with collision placement
   against other labels and a ±12 px waypoint anchor, clamped inside the canvas
   (`:329-385`).
-- Denied area: pattern hatch, **18 %** fill opacity, 1 px muted-red line, and
-  the fixed label `DENIED AREA (EXERCISE - ILLUSTRATIVE)`
-  (`RehearsalMap.tsx:282`, `zones.ts:7`). The three polygons are small,
-  illustrative, inside their preset region and per `zones.ts:1-5` at least
-  50 km from any land border; they are not real restricted areas. Ground
-  stations are similarly illustrative (`zones.ts:60-64`).
+- Denied areas: pattern hatch, **18 %** fill opacity, 1 px muted-red line, and
+  the label `DENIED AREA (EXERCISE - ILLUSTRATIVE)` (`RehearsalMap.tsx`). They
+  come from the current Mission's zones, are drawn only as exercise geography
+  and are not real restricted areas. Ground stations are similarly
+  illustrative and come from the Mission object.
 - Camera: `fitRouteCamera` is explicit Web Mercator math rather than
   `fitBounds`, with a zoom-10 ceiling and caller padding (FLY now uses
   96/380 px so the DATA panel does not cover the route) so the route is framed
@@ -789,23 +837,28 @@ is invented to fill that gap.
 ## Data Guard — recon payload, crypto, link and guard (October 2026)
 
 ### Recon points and dummy payload
-- Five points of interest per preset, placed beside a hold or waypoint from a
-  fixed per-preset anchor table (`pois.ts:26-81`). The per-preset seed varies
-  each nominal size by ±10 % and offsets the site by up to 0.003° (about
-  ±330 m); priorities and types are fixed per anchor, so every rehearsal of a
-  preset captures the same manifest (`pois.ts:93-113`).
-- **Sizes:** IMAGE **15-60 MB**, VIDEO **150-600 MB** (`pois.ts:83-87`). These
-  are assumed reconnaissance-product sizes, not sensor-format arithmetic.
+- **One item per mission RECON node**, in route order; the node name is the
+  manifest anchor and its position is the site (`pois.ts`). There is no fixed
+  per-preset anchor table any more: add, move, rename or delete a RECON node and
+  the manifest follows. Type (IMAGE/VIDEO), nominal size (±10 %), priority (1-3)
+  and a sub-kilometre site offset are seeded from
+  `templateId|missionId:nodeId:nodeName`, so every rehearsal of a mission
+  captures the same manifest.
+- **Sizes:** IMAGE **15-60 MB**, VIDEO **150-600 MB**. These are assumed
+  reconnaissance-product sizes, not sensor-format arithmetic.
 - **Capture:** the first route sample within **3 000 m** of the site captures
-  the item (`pois.ts:16`, `:116-126`). The route is sampled every **5 mission
-  seconds**, so the capture timestamp is a mission-clock value, not sim time.
+  the item. The route is sampled every **5 mission seconds**, so the capture
+  timestamp is a mission-clock value, not sim time.
 - The encrypted object is a deterministic dummy: a readable four-line header
-  plus seeded random bytes at **1:100000** of the nominal size, floor **192 B**
-  (`dummy.ts:8-12`, `:36-56`). Every transfer, counter and capacity figure uses
-  the nominal MB, never the dummy byte count. The ground-station DECRYPT button
-  therefore shows the demo header, not imagery.
-- Ground stations and denied areas come from the illustrative exercise
-  geography in `data/zones.ts`; they are not operational.
+  plus seeded random bytes at **1:100000** of the nominal size, floor **192 B**.
+  Every transfer, counter and capacity figure uses the nominal MB, never the
+  dummy byte count. The ground-station DECRYPT button therefore shows the demo
+  header, not imagery.
+- Ground stations, denied areas and custom landing sites come from the Mission
+  object. They are illustrative and are not operational geography. The Data
+  Guard cards are generic: their titles describe the intended geometry, and the
+  guard reacts to the current mission's zone, alternates and link rather than a
+  hard-coded preset.
 
 ### Cryptography
 - At session start each end generates an **ephemeral ECDH P-256** key pair.
@@ -839,7 +892,7 @@ is invented to fill that gap.
   The DATA panel footer and README state the same.
 
 ### Simulated datalink
-- Ground station per preset (`zones.ts:61-65`). Effective range is
+- The ground station is a Mission field (draggable in BRIEF). Effective range is
   **min(250 km, 4.12 x (sqrt(h_uav_m) + sqrt(10 m)))** km
   (`link.ts:9-17`, `:35`). With the UAV at 5 200 m the horizon is ~301 km, so
   the 250 km assumption binds.
@@ -901,29 +954,33 @@ Supporting rules:
 - All three cooling cards use cylinder **3**, severity **0.6**, ramp **30 s**.
   The twin starts flagging about **32 sim s** (~1 h 50 min mission) after
   injection, and the measured CHT stays below the 135 °C limit through 120 sim
-  seconds.
-- **COOLING OVER DENIED AREA (a):** injection at mission 0; detection over
-  SHAM inside the zone. The link is up, so items captured at SHAM have already
-  been sent; the guard arms, the offload completes and the erase fires on
-  "Offload finished". Probe: 666 MB collected/secured, 0 lost, recovery 3/3
-  blocks failed on the Ladakh preset.
+  seconds. This is a property of the fault model, independent of geography.
+- The guard outcome is **mission-dependent**. The card titles describe the
+  intended geometry; the guard follows the decision table on the current
+  mission's zones, alternates and link. Load the Ladakh template to exercise the
+  denied-area erase paths; a mission with no zone or no reachable alternate
+  will not behave as the title suggests.
+- **COOLING OVER DENIED AREA (a):** injection at mission 0. If detection occurs
+  inside a denied zone with the link up, the guard arms, sends what fits and
+  erases on "Offload finished". On the Ladakh template the detection point is
+  inside the exercise zone.
 - **FAILURE + LINK JAMMED (b):** jammed from the start, so no item is ever
-  sent. At detection the predicted loss is inside and the RUL is still null;
-  the null-margin fallback rejects the range-only alternates, and JAMMED fires
-  the erase immediately. Every captured item is lost; the recovery attempt
-  fails on every block.
-- **FAILURE OVER FRIENDLY AREA (c):** trigger at **57 %** of the route
-  (in the ALCHI hold). The compressed ramp is detected ~1 h 50 min later over
-  PHEY, after the aircraft has left the zone. The predicted loss stays outside
-  the denied area, so a range-REACHABLE alternate with a null margin is
-  accepted and the guard holds STANDBY to landing; the data offloads and the
-  key is retained (probe: 992 MB secured, 0 lost, no erase).
+  sent. At detection, with the predicted loss inside and the RUL still null,
+  the null-margin fallback rejects range-only alternates and JAMMED fires the
+  erase immediately. Every captured item is lost.
+- **FAILURE OVER FRIENDLY AREA (c):** trigger at **57 %** of the route,
+  intended to be after the aircraft has left the denied area. When the
+  predicted loss stays outside the zone, a range-REACHABLE alternate with a
+  null margin is accepted and the guard holds STANDBY to landing; data offloads
+  and the key is retained.
 - **SENSOR GLITCH (d):** `sensorOnly` is set by the card, so the guard stays in
   MONITOR for the whole run even though the classifier warns; no erase.
 
 ### Verification
-`npx tsc --noEmit`, `npm run build`, and `npx vitest run` (176 tests) pass.
-The Data Guard tests cover: ECDH/HKDF agreement, AES-GCM round trip and tamper
+`npx tsc --noEmit`, `npm run build`, and `npx vitest run` (187 tests) pass.
+The mission-editor tests cover route geometry and zone crossings, undo/redo,
+GeoJSON round-trip, template loading and validation of every template. The Data
+Guard tests cover: ECDH/HKDF agreement, AES-GCM round trip and tamper
 rejection, hash verification at the ground, zeroize making the stored
 ciphertext undecryptable, word-for-word adversary failure after zeroize, link
 horizon/rate/jam states, offload budget and priority order, the four guard
@@ -933,9 +990,186 @@ covered all four Data Guard cards, the ground-station progress + DECRYPT
 preview, the 3 s adversary verdict, JAM by button and key, STOP/PAUSE and
 REPLAY reset. See README for the browser-crypto limitation.
 
-Earlier rehearsal checks remain valid: BRIEF preset fly-to and MC GO with
+Live acceptance of the mission editor (October 2026): search "Mysuru" then add
+three nodes by map click, drag, insert, delete, undo/redo with list and map in
+agreement; edit latitude in the list and see the marker move; draw a denied zone
+across the route and get ZONES CAUTION; save, reload, load from localStorage and
+round-trip a 12 kB GeoJSON export through import in a fresh tab; and run a
+Bengaluru-only mission BRIEF → FLY → DEBRIEF (0:06:57, 14.8 km) with no app
+console errors. The only console errors during the run were Open-Meteo HTTP 429
+rate limits; the app degraded to FALLBACK weather and a "terrain resolving"
+CAUTION as designed.
+
+Earlier rehearsal checks remain valid: template load and route fit, MC GO with
 three factor sentences; cooling WARNING/CRITICAL with cylinder + delta and the
 computed lead line; sensor ADVISORY for a full run; nearest-landing changes
 between holds; ticker fade after 8 s; E/Esc overlay round trip while paused;
 REPLAY and NEW MISSION.
+
+## Mission editor (October 2026)
+
+### One Mission object is the source of truth
+`Mission` (`src/mission/types.ts`) is:
+
+```ts
+{ id, name, templateId?, engineProfileId, startTimeUTC,
+  nodes: Node[], zones: Zone[], groundStation: {lat, lon},
+  customSites: Site[], weatherMode: 'FORECAST' | 'MANUAL' }
+```
+
+- `Node`: `id`, `type` (LAUNCH | WAYPOINT | LOITER | RECON | LAND), `name`,
+  `lat`, `lon`, `alt`, `altRef` (AGL | AMSL), `loiterMin`, optional `speed`.
+- `Zone`: `id`, `name`, `type` (DENIED | RESTRICTED), closed `polygon` of
+  `[lon, lat]` pairs.
+- `Site`: `id`, `name`, `type` (STRIP | FIELD | HELIPAD), `lat`, `lon`,
+  `elevM`.
+
+BRIEF, FLY, DEBRIEF, the pre-flight checks, the alternates layer, the Data Guard
+manifest, the replay map and the Monte Carlo all read this same object. No
+component looks up a fixed preset table: change a node and every derived panel
+follows. The five JSON templates are cloned into a Mission and are only a
+starting point.
+
+### Templates
+`src/data/templates/*.json` holds `ladakh`, `rajasthan`, `coastal`,
+`plains-agri` and `coastal-survey`; `index.ts` clones them (deep-copying nodes,
+zones, sites and polygons). Loading a template replaces name, nodes, zones,
+sites, ground station, start time and `templateId` and clears undo/redo; the
+saved-mission list and assessment settings (run count, seed) are not touched.
+RESET TO TEMPLATE restores the source template's nodes, zones, sites and ground
+station while keeping the current mission name, start time, id and engine
+profile, and it clears per-node weather overrides. Every template is marked
+**illustrative** in the UI and is not operational geography.
+
+### Editing rules
+- Click empty map to append a node; drag a marker to move it; click a **+**
+  handle at a leg midpoint to insert; Delete or the row button removes.
+  A mission needs at least two nodes.
+- **50 node maximum.** A 51st click is refused with `NODE LIMIT REACHED (50)`.
+- Undo/redo keep the last **100** mission snapshots (`HISTORY_LIMIT = 100`);
+  Ctrl+Z / Ctrl+Y or the panel buttons. Esc cancels zone/site placement and
+  search.
+- Node list rows are draggable to reorder. Inline fields validate before
+  commit: name non-empty (trimmed to 40 characters); latitude −90..90;
+  longitude −180..180; altitude 0..20 000 m (stored as an integer); loiter
+  ≥ 0 min (integer); speed either blank or 5..150 m/s. Lat/lon are displayed to
+  **5 decimal places** and stored as entered. A rejected edit turns the field
+  red with an `INVALID INPUT - NOT APPLIED` title and leaves the stored value
+  unchanged.
+- Search uses Open-Meteo geocoding
+  (`https://geocoding-api.open-meteo.com/v1/search?name=...&count=5`), flies
+  the map to the result and offers ADD NODE HERE. Pasting `lat, lon` is
+  accepted.
+- Zones: draw a polygon by clicking vertices and double-clicking to finish;
+  drag vertices to reshape; rename, retype (DENIED/RESTRICTED) or delete. A
+  warning names every crossing leg when the route intersects a zone.
+- Ground station: draggable marker with a link-range ring. Custom landing
+  sites: ADD LANDING SITE then a map click; name, type and elevation are
+  editable, with elevation prefilled from the terrain cache or the elevation
+  API.
+- AUTO-PLACE RECON inserts `k` (1-10) RECON nodes spaced along the route with
+  a seeded ±150 m lateral offset, so the same mission and `k` produce the same
+  points. Each is editable.
+- Mission start is stored as an ISO instant and edited in **IST (UTC+5:30)**;
+  weather is fetched for that hour.
+
+### Terrain and AGL
+- Elevations come from the Open-Meteo elevation API
+  (`https://api.open-meteo.com/v1/elevation`), in **batches of 100** points,
+  because the stage map does not enable a terrain DEM. Requests never throw;
+  a failed batch is treated as absent.
+- Cache: memory plus `localStorage` under `aerotwin.terrain.v1`, keyed to
+  **4 decimal places** (about 11 m at the equator), trimmed to the newest
+  **4000** entries. A node with no cached elevation shows 0 m terrain until the
+  fetch settles.
+- AGL is resolved at edit time (`alt + terrain` for AGL nodes) and again when
+  the profile is planned. The pre-flight route is sampled every **1 km**, up to
+  **600** samples, and each sample is compared with the cached terrain.
+- **Terminal buffer:** the 100 m cruise minimum is not applied within
+  **1 km** (or 10 % of a shorter route) of each route end, because takeoff and
+  landing are planned at field elevation. Outside that buffer: below terrain
+  FAIL, below 100 m CAUTION, above 100 m PASS. More than 10 % (or at least 5)
+  of samples without terrain data reports CAUTION "still resolving" rather than
+  a false clearance.
+- **Ladakh waypoints:** live DEM sampling found a 5 543 m ridge between ALCHI
+  RIDGE and PHEY and a 5 462 m ridge between SHAM and ALCHI in the migrated
+  template. Two waypoints were added — **STOK PASS** (5 660 m, id 9) and
+  **INDUS PASS** (5 580 m, id 10) — so the planned path clears the ridge by
+  about 117 m. The ids are deliberately non-sequential: the Data Guard manifest
+  seeds on `node.id` and `node.name`, and renumbering the survey points would
+  change every existing rehearsal's payload. This is a DEM check, not a
+  certified obstacle survey.
+
+### Loiter and long missions
+- A LOITER node flies a level circle at the local cruise TAS; radius is
+  `V² / (g·tan 20°)` (**~343 m** at 35 m/s, bank **20°**), held for
+  `loiterMin`. Entry and exit are part of the planned profile; the orbit is not
+  a separate physics model.
+- Climb and descent use the documented profile rates (3.0 m/s up, 5.0 m/s
+  down) and the fixed phase airspeeds; no wind shear or step climbs.
+- Missions longer than **8 h** switch the headless/Monte Carlo integration step
+  from **0.25 s** to **0.5 s** (`LONG_MISSION_S`, `LONG_MISSION_DT`). This keeps
+  a long mission's run time bounded while preserving the rpm state's stability;
+  the step is chosen by planned duration, so it is deterministic per mission.
+
+### GeoJSON interchange
+Export writes a FeatureCollection containing:
+- the route as a **LineString** (`kind: route`, plus name, engine profile and
+  start time);
+- one **Point** per node with all node properties (including `altRef` and
+  `loiterMin`);
+- one **Polygon** per zone with name and type;
+- the ground station as a **Point**;
+- one **Point** per custom landing site.
+
+The complete Mission is also attached as a non-standard `mission` member, so an
+AeroTwin export round-trips exactly in ids and metadata. Import accepts
+that fast path, and otherwise reconstructs a mission from a foreign
+FeatureCollection (LineString required; node/site points, zone polygons and
+ground station optional). Invalid JSON, a missing LineString or an incomplete
+`mission` member is rejected with a message; the current mission is unchanged.
+
+### Persistence
+Saved missions live in `localStorage` under `aerotwin.missions.v1` as an array
+of `{id, name, savedAt, mission}`. Save uses the current mission name;
+duplicate and delete are explicit list actions. This is browser-local only —
+there is no account or server. An application error boundary replaces the
+stage with a flat `SOMETHING WENT WRONG - RESET` panel, so a rendering fault
+does not leave a white screen.
+
+### Pre-flight checks
+The BRIEF panel recomputes six checks after every edit (terrain 0.5 s debounce,
+weather 1.5 s debounce) and marks the stored assessment **OUTDATED** until
+ASSESS MISSION is rerun.
+
+| Check | PASS | CAUTION | FAIL |
+|---|---|---|---|
+| TERRAIN CLEARANCE | min AGL ≥ 100 m | < 100 m, or > 10 % samples unresolved | below terrain |
+| ZONES | no crossing | any route/zone crossing | — |
+| FUEL | margin ≥ 6 kg after reserve | 0-6 kg | negative margin |
+| ALTERNATES | every leg midpoint has a field in glide range | any leg with none | — |
+| DATALINK | ≥ 90 % of route within link range | 60-90 % | < 60 % |
+| WEATHER | DA below ceiling − 500 m and < severe turbulence | DA ≤ ceiling with < 500 m margin, or severe turbulence | DA above the 6.3 km ceiling |
+
+Fuel uses the nominal healthy full-profile run, `MISSION_FUEL_KG` 95 kg and a
+**12 kg / 30 min** reserve; margin minutes are margin divided by nominal burn
+per minute. Alternates use glide ratio **12:1**; datalink samples every 2 km
+(up to 500 samples) against `min(250 km, radio horizon)`; weather compares the
+peak density altitude at the segment endpoints and nodes with
+`CEILING_DENSITY_ALT_M` 6300 m. The six statuses are shown separately; they are
+not collapsed into one score.
+
+ASSESS MISSION runs the existing seeded Monte Carlo (minimum 200 runs) and
+returns GO / CAUTION / NO-GO with the top three plain-language factors. The
+verdict thresholds are unchanged from M3: GO needs P(complete) ≥ 0.90, every
+leg ≤ 0.25 breach and median margin ≥ 6 kg; CAUTION needs ≥ 0.75, legs ≤ 0.55
+and margin ≥ 0 kg; anything worse is NO-GO.
+
+### Verification
+`npx tsc --noEmit`, `npm run build` and `npx vitest run` pass (187 tests in 14
+files). The mission tests cover geometry and zone crossings, undo/redo and the
+100-step cap, the 50-node cap, GeoJSON round-trip (own and foreign), template
+reset identity, saved-mission reload and the append/drag/insert/delete
+acceptance flow. See the Data Guard verification above for the live acceptance
+run.
 

@@ -19,10 +19,17 @@ import {
   MC_MIN_RUNS,
   MC_WEAR_RATE_PER_H,
   MC_WEAR_SPREAD_PER_H,
-  MISSION_DT,
   MISSION_FUEL_KG,
 } from './constants';
-import { planMission, runMission, wxAt, type DegradationItem, type MissionPlan, type RunResult } from './mission';
+import {
+  missionDtFor,
+  planMission,
+  runMission,
+  wxAt,
+  type DegradationItem,
+  type MissionPlan,
+  type RunResult,
+} from './mission';
 import { jitterTurbulence, type WaypointWeather } from './weather';
 import { makeNormal, mulberry32 } from '../sim/rng';
 import type { EngineState } from '../sim/engineModel';
@@ -175,10 +182,12 @@ export interface ProgressFn {
 /** Integrate every run on this thread. Used as the worker-pool fallback. */
 function runSetSync(
   req: McRequest,
+  plan: MissionPlan,
   base: EngineState,
   runs: PreDrawnRun[],
   onProgress?: ProgressFn,
 ): MissionRunSummary[] {
+  const dt = missionDtFor(plan.totalS);
   const out: MissionRunSummary[] = [];
   for (let i = 0; i < runs.length; i++) {
     const r = runs[i];
@@ -191,7 +200,7 @@ function runSetSync(
           initState: base,
           seed: r.seed,
           growthPerH: r.growthPerH,
-          dt: MISSION_DT,
+          dt,
           checkLimits: true,
         }),
         r.index,
@@ -223,12 +232,13 @@ export function runMonteCarloPool(req: McRequest, onProgress?: ProgressFn): Prom
   const drawn = drawRunSet(req, runs);
   const refs = comparisonRuns(req, plan);
   if (typeof Worker === 'undefined') {
-    const summaries = runSetSync(req, base, drawn, onProgress);
+    const summaries = runSetSync(req, plan, base, drawn, onProgress);
     return Promise.resolve(aggregate(req, plan, drawn.length, summaries, refs, started, 1));
   }
   return new Promise((resolve) => {
     const chunks = chunkRuns(drawn, workerCount(runs));
     const n = chunks.length;
+    const dt = missionDtFor(plan.totalS);
     const summaries: MissionRunSummary[] = [];
     let finished = 0;
     let done = 0;
@@ -236,7 +246,7 @@ export function runMonteCarloPool(req: McRequest, onProgress?: ProgressFn): Prom
     const settle = () => {
       for (const w of workers) w.terminate();
       if (errored) {
-        const fallback = runSetSync(req, base, drawn, onProgress);
+        const fallback = runSetSync(req, plan, base, drawn, onProgress);
         resolve(aggregate(req, plan, drawn.length, fallback, refs, started, 1));
         return;
       }
@@ -269,7 +279,7 @@ export function runMonteCarloPool(req: McRequest, onProgress?: ProgressFn): Prom
         waypoints: req.waypoints,
         items: req.items,
         initState: base,
-        dt: MISSION_DT,
+        dt,
         runs: chunk,
       };
       w.postMessage(job);
@@ -286,7 +296,7 @@ export function runMonteCarlo(req: McRequest, onProgress?: ProgressFn): McResult
   const base = missionStartState(req);
   const drawn = drawRunSet(req, runs);
   const refs = comparisonRuns(req, plan);
-  const summaries = runSetSync(req, base, drawn, onProgress);
+  const summaries = runSetSync(req, plan, base, drawn, onProgress);
   return aggregate(req, plan, drawn.length, summaries, refs, started, 1);
 }
 
@@ -310,7 +320,7 @@ function referenceRun(
     seed: req.seed >>> 0,
     growthPerH: 0,
     checkLimits: false,
-    dt: MISSION_DT,
+    dt: missionDtFor(plan.totalS),
   });
   return toHealthy(r);
 }
@@ -516,7 +526,7 @@ function aggregate(
       ? median(completed.map((r) => (r.fuelUsedKg / Math.max(1, r.timeS)) * 3600))
       : NaN,
     buildMs: Date.now() - started,
-    dtS: MISSION_DT,
+    dtS: missionDtFor(plan.totalS),
     workers,
   };
 }

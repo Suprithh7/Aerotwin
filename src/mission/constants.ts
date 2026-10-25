@@ -9,6 +9,17 @@ export type SegKindName = 'takeoff' | 'climb' | 'cruise' | 'loiter' | 'descent' 
 // states stable (first-order lags use the analytic step).
 export const MISSION_DT = 0.25;
 
+// Missions longer than 8 h (the editor sets no duration limit) switch to a
+// 0.5 s step so a Monte Carlo sweep over an inter-city route stays tractable.
+// The engine's shaft-speed and oil loops have time constants below 1 s, so the
+// coarse step trades transient fidelity for runtime, not steady-state accuracy;
+// see ASSUMPTIONS.md.
+export const LONG_MISSION_S = 8 * 3600;
+export const LONG_MISSION_DT = 0.5;
+
+// Bank angle held in a level loiter orbit; radius = V^2 / (g tan bank).
+export const LOITER_BANK_DEG = 20;
+
 // Assumed constant airspeeds per profile segment, m/s true airspeed.
 export const MISSION_AIRSPEED = {
   takeoff: 30,

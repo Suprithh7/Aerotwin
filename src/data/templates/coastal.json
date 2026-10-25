@@ -1,0 +1,39 @@
+{
+  "id": "coastal",
+  "name": "WEST COAST TRANSIT",
+  "region": "West coast - Mumbai to Kochi via Goa and Mangaluru",
+  "description": "Southbound coastal transit into a strong headwind, with reconnaissance along the Konkan and Malabar coasts. Illustrative geography only.",
+  "engineProfileId": "nominal",
+  "startTimeUTC": "2026-10-25T03:30:00.000Z",
+  "templateId": "coastal",
+  "illustrative": true,
+  "weatherMode": "forecast",
+  "groundStation": { "lat": 15.43, "lon": 73.79 },
+  "zones": [
+    {
+      "id": 1,
+      "name": "GOA OFFSHORE DENIED AREA",
+      "type": "DENIED",
+      "polygon": [
+        [72.98, 14.1],
+        [73.2, 14.08],
+        [73.24, 14.3],
+        [73.01, 14.32],
+        [72.98, 14.1]
+      ]
+    }
+  ],
+  "customSites": [
+    { "id": 1, "name": "GOA COASTAL FIELD", "type": "FIELD", "lat": 15.42, "lon": 73.87, "elevM": 40 }
+  ],
+  "nodes": [
+    { "id": 1, "type": "LAUNCH", "name": "MUMBAI", "lat": 19.088699, "lon": 72.867897, "alt": 12, "altRef": "AMSL", "loiterMin": 0 },
+    { "id": 2, "type": "RECON", "name": "RATNAGIRI COAST", "lat": 17.0, "lon": 73.28, "alt": 3600, "altRef": "AMSL", "loiterMin": 30 },
+    { "id": 3, "type": "RECON", "name": "GOA", "lat": 15.380062, "lon": 73.833328, "alt": 3800, "altRef": "AMSL", "loiterMin": 0 },
+    { "id": 4, "type": "LOITER", "name": "GOA HOLD", "lat": 15.36, "lon": 73.78, "alt": 3800, "altRef": "AMSL", "loiterMin": 120 },
+    { "id": 5, "type": "RECON", "name": "MALABAR COAST", "lat": 13.6, "lon": 74.7, "alt": 3900, "altRef": "AMSL", "loiterMin": 30 },
+    { "id": 6, "type": "RECON", "name": "MANGALURU", "lat": 12.95471, "lon": 74.886812, "alt": 4000, "altRef": "AMSL", "loiterMin": 60 },
+    { "id": 7, "type": "RECON", "name": "KOCHI", "lat": 10.151047, "lon": 76.400838, "alt": 9, "altRef": "AMSL", "loiterMin": 0 },
+    { "id": 8, "type": "LAND", "name": "KOCHI", "lat": 10.151047, "lon": 76.400838, "alt": 9, "altRef": "AMSL", "loiterMin": 0 }
+  ]
+}

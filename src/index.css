@@ -2,6 +2,32 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --bg: #0b0d10;
+  --panel: #11151a;
+  --edge: #232a33;
+  --txt: #d7dee7;
+  --dim: #93a0b0;
+  --steel: #5b8db8;
+  --amber: #c9922e;
+  --red: #c4443f;
+  --data: #5e9c9a;
+  --paper: #0b0d10;
+  --sheet: #11151a;
+  --ink: #d7dee7;
+  --ink-2: #b6c2d0;
+  --ink-3: #93a0b0;
+  --rule: #232a33;
+  --rule-strong: #3a4552;
+  --route: #5b8db8;
+  --active-track: #5b8db8;
+  --airport: #5b8db8;
+  --ok: #5b8db8;
+  --caution: #c9922e;
+  --critical: #c4443f;
+  color-scheme: dark;
+}
+
 html,
 body,
 #root {
@@ -9,11 +35,22 @@ body,
 }
 
 body {
-  background: #0b0d10;
-  color: #d7dee7;
+  background: var(--bg);
+  color: var(--txt);
+  font-family: 'IBM Plex Sans', sans-serif;
   font-size: 12px;
   line-height: 16px;
   overflow: hidden;
+}
+
+::selection {
+  background: var(--steel);
+  color: var(--bg);
+}
+
+* {
+  scrollbar-color: var(--edge) var(--bg);
+  scrollbar-width: thin;
 }
 
 .num {
@@ -21,57 +58,112 @@ body {
   font-feature-settings: 'tnum';
 }
 
-select,
-input[type='text'],
-input[type='number'] {
-  background: #0b0d10;
-  color: #d7dee7;
-  border: 1px solid #232a33;
-  padding: 2px 6px;
-  font-size: 12px;
+.panel-title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 500;
+  font-size: 11px;
+  line-height: 16px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
 }
 
-/* Compact console fields: no spinner chrome stealing column width. */
-input[type='number'] {
-  appearance: textfield;
-  -moz-appearance: textfield;
-}
-input[type='number']::-webkit-inner-spin-button,
-input[type='number']::-webkit-outer-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
+@layer components {
+  select,
+  input[type='text'],
+  input[type='number'],
+  input[type='datetime-local'] {
+    background: var(--bg);
+    color: var(--txt);
+    border: 1px solid var(--edge);
+    border-radius: 0;
+    padding: 2px 6px;
+    font-size: 12px;
+    font-family: inherit;
+  }
+
+  input::placeholder {
+    color: var(--dim);
+  }
+
+  select:disabled,
+  input:disabled {
+    color: var(--dim);
+    border-color: var(--edge);
+    background: var(--panel);
+  }
+
+  /* Compact console fields: no spinner chrome stealing column width. */
+  input[type='number'] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+  }
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  input[type='range'] {
+    accent-color: var(--steel);
+  }
+
+  button {
+    border: 1px solid var(--edge);
+    background: var(--panel);
+    color: var(--txt);
+    border-radius: 0;
+    padding: 2px 8px;
+    font-size: 12px;
+    font-family: inherit;
+  }
+
+  button:hover:not(:disabled) {
+    border-color: var(--steel);
+  }
+
+  button.primary {
+    border-color: var(--steel);
+    color: var(--bg);
+    background: var(--steel);
+  }
+
+  button.active {
+    border-color: var(--steel);
+    color: var(--steel);
+    background: var(--panel);
+  }
+
+  button.primary:hover:not(:disabled) {
+    background: var(--steel);
+    border-color: var(--steel);
+  }
+
+  button.active:hover:not(:disabled) {
+    background: var(--panel);
+    border-color: var(--steel);
+  }
+
+  button:disabled {
+    cursor: default;
+    color: var(--dim);
+    border-color: var(--edge);
+    background: var(--panel);
+  }
+
+  button:disabled:hover {
+    border-color: var(--edge);
+  }
 }
 
-input[type='range'] {
-  accent-color: #5b8db8;
+:focus-visible {
+  outline: 2px solid var(--steel);
+  outline-offset: 1px;
 }
 
-button {
-  border: 1px solid #232a33;
-  background: #11151a;
-  color: #d7dee7;
-  padding: 2px 8px;
-  font-size: 12px;
-}
-button:hover {
-  border-color: #5b8db8;
-}
-button.active {
-  border-color: #5b8db8;
-  color: #5b8db8;
-}
-
-/* HUD surface: bg-1 at 88%, 1px line-0 edge, square corners, no effects. */
+/* HUD surface: panel at 88%, 1px edge, square corners, no effects. */
 .hud-panel {
   background-color: rgb(17 21 26 / 0.88);
-  border: 1px solid #232a33;
+  border: 1px solid var(--edge);
   border-radius: 0;
-}
-
-button:disabled {
-  cursor: default;
-}
-
-button:disabled:hover {
-  border-color: #232a33;
 }

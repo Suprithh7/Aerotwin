@@ -3,7 +3,6 @@
 // formats them.
 import type { Factor } from '../mission/monteCarlo';
 import type { WaypointWeather } from '../mission/weather';
-import { weatherPresetById } from '../mission/weather';
 import { CHT_NOMINAL_C } from '../sim/limits';
 import { REHEARSAL_SIM_SPAN_S, fmtClock, fmtMmSs } from './clock';
 import type { DebriefResult, Outcome, RehearsalEvent, TimelineTick } from './types';
@@ -56,16 +55,9 @@ function signedC(v: number): string {
   return `${v >= 0 ? '+' : ''}${Math.round(v)}`;
 }
 
-const WEATHER_LEAD: Record<string, string> = {
-  standard: 'Standard day',
-  'hot-high': 'Hot and high',
-  headwind: 'Headwind and turbulence',
-};
-
 /** One plain sentence built only from the selected weather cells. */
-export function weatherSentence(cells: WaypointWeather[], presetId: string): string {
+export function weatherSentence(cells: WaypointWeather[], lead = 'Forecast'): string {
   if (!cells.length) return 'No weather inputs are set for this route.';
-  const lead = WEATHER_LEAD[presetId] ?? weatherPresetById(presetId).name;
   const isas = cells.map((c) => c.isaDevC);
   const isaMin = Math.min(...isas);
   const isaMax = Math.max(...isas);

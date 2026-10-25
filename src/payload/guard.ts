@@ -4,7 +4,7 @@
 // fault and a predicted loss inside the denied area.
 import { GLIDE_RATIO, type AlternateRow } from '../nav/alternates';
 import { REHEARSAL_SIM_SPAN_S } from '../rehearsal/clock';
-import type { DeniedZone } from '../data/zones';
+import type { MissionZone } from '../mission/types';
 import type { OffloadFit } from './offload';
 import type { GuardState, LinkState } from './types';
 
@@ -44,8 +44,13 @@ export function pointInPolygon(lon: number, lat: number, ring: [number, number][
   return inside;
 }
 
-export function insideDeniedZone(zone: DeniedZone | undefined, lat: number, lon: number): boolean {
-  return zone ? pointInPolygon(lon, lat, zone.polygon) : false;
+/** True when the point lies inside any mission zone (denied or restricted). */
+export function insideDeniedZone(
+  zones: Pick<MissionZone, 'polygon'>[] | undefined,
+  lat: number,
+  lon: number,
+): boolean {
+  return zones ? zones.some((zone) => pointInPolygon(lon, lat, zone.polygon)) : false;
 }
 
 /**

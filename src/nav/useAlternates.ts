@@ -1,18 +1,19 @@
 // Live alternate-airfield layer: assembles the NavState from the simulation,
 // the mission weather and the diagnosis, and recomputes reachability on a
-// one-second cadence (the UI runs at 10 Hz; re-evaluating fifteen great-circle
-// problems every tick would only add noise to the readout).
+// one-second cadence (the UI runs at 10 Hz; re-evaluating every nearby field
+// every tick would only add noise to the readout).
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AIRFIELDS, airfieldsByIcao, type Airfield } from '../data/airfields';
+import { AIRFIELDS, alternatesForSites, type Airfield } from '../data/airfields';
 import { PHASES } from '../sim/constants';
 import { useSimStore } from '../state/store';
 import { useMissionStore } from '../mission/missionStore';
-import { presetById, distanceM, type Waypoint } from '../mission/route';
+import { distanceM } from '../mission/route';
+import type { Mission } from '../mission/types';
 import { wxAt } from '../mission/mission';
 import { computeAlternates, nearestReachable, type AlternateRow, type NavState } from './alternates';
 
-/** The airfields offered as alternates when the route is hand-drawn. */
-const CUSTOM_ALTERNATE_COUNT = 6;
+/** Fields farther than this from the aircraft are not offered as alternates. */
+export const MAX_ALTERNATE_RADIUS_M = 400_000;
 
 export interface NavPosition {
   lat: number;
@@ -32,32 +33,19 @@ export interface NavLayer {
 const EMPTY_LAYER: NavLayer = { rows: [], nearest: null, reachable: null, alert: false, state: null };
 
 /**
- * The airfields the active route is planned around. A preset's home and
- * destination are the mission's endpoints, not its alternates: the field under
- * the aircraft would otherwise read as the nearest alternate at zero distance.
+ * All bundled airports plus the mission's custom landing sites within 400 km of
+ * the aircraft, nearest first. The mission's own endpoints are not excluded:
+ * the aircraft standing over its destination should see it as the nearest field.
  */
-export function activeAirfields(presetId: string, wps: Waypoint[]): Airfield[] {
-  const preset = presetById(presetId);
-  if (preset) return airfieldsByIcao(preset.alternateIcaos);
-  if (wps.length < 2) return [];
-  const mid = {
-    lat: wps.reduce((s, w) => s + w.lat, 0) / wps.length,
-    lon: wps.reduce((s, w) => s + w.lon, 0) / wps.length,
-  };
-  return [...AIRFIELDS]
-    .sort((p, q) => distanceM(mid.lat, mid.lon, p.lat, p.lon) - distanceM(mid.lat, mid.lon, q.lat, q.lon))
-    .slice(0, CUSTOM_ALTERNATE_COUNT);
+export function alternateFields(mission: Mission, lat: number, lon: number): Airfield[] {
+  return [...AIRFIELDS, ...alternatesForSites(mission.customSites)]
+    .map((airfield) => ({ airfield, distM: distanceM(lat, lon, airfield.lat, airfield.lon) }))
+    .filter((x) => x.distM <= MAX_ALTERNATE_RADIUS_M)
+    .sort((a, b) => a.distM - b.distM)
+    .map((x) => x.airfield);
 }
 
-export function airfieldRole(presetId: string, icao: string): 'home' | 'dest' | 'alt' | null {
-  const preset = presetById(presetId);
-  if (!preset) return null;
-  if (icao === preset.homeIcao) return 'home';
-  if (icao === preset.destIcao) return 'dest';
-  return preset.alternateIcaos.includes(icao) ? 'alt' : null;
-}
-
-function buildNavState(pos: NavPosition, fields: Airfield[]): NavLayer {
+function buildNavState(pos: NavPosition, mission: Mission): NavLayer {
   const sim = useSimStore.getState();
   const alert = sim.diagnosis.state !== 'NOMINAL';
   if (!sim.snapshot) return { ...EMPTY_LAYER, alert };
@@ -78,20 +66,20 @@ function buildNavState(pos: NavPosition, fields: Airfield[]): NavLayer {
     windSpdMs: w.windSpdMs,
     rulP10S: sim.diagnosis.rul?.status === 'OK' ? sim.diagnosis.rul.p10S : null,
   };
-  const rows = computeAlternates(ns, fields);
+  const rows = computeAlternates(ns, alternateFields(mission, pos.lat, pos.lon));
   return { rows, nearest: rows[0] ?? null, reachable: nearestReachable(rows), alert, state: ns };
 }
 
-export function useAlternates(pos: NavPosition | null, fields: Airfield[]): NavLayer {
+export function useAlternates(pos: NavPosition | null, mission: Mission | null): NavLayer {
   const [layer, setLayer] = useState<NavLayer>(EMPTY_LAYER);
-  const srcRef = useRef({ pos, fields });
-  srcRef.current = { pos, fields };
+  const srcRef = useRef({ pos, mission });
+  srcRef.current = { pos, mission };
 
   const recompute = useCallback(() => {
-    const { pos: p, fields: f } = srcRef.current;
+    const { pos: p, mission: m } = srcRef.current;
     setLayer(
-      p && f.length
-        ? buildNavState(p, f)
+      p && m
+        ? buildNavState(p, m)
         : { ...EMPTY_LAYER, alert: useSimStore.getState().diagnosis.state !== 'NOMINAL' },
     );
   }, []);
@@ -100,7 +88,7 @@ export function useAlternates(pos: NavPosition | null, fields: Airfield[]): NavL
     recompute();
     const id = window.setInterval(recompute, 1000);
     return () => window.clearInterval(id);
-  }, [recompute, fields]);
+  }, [recompute, mission]);
 
   return layer;
 }

@@ -1,5 +1,6 @@
-// Route geometry, waypoints and mission presets.
-// Waypoint altitudes are the cruise altitude of the leg FLYING TO that waypoint.
+// Route geometry and the resolved waypoint type used by the simulator.
+// Node altitudes arrive with a reference (AGL/AMSL); by the time they reach the
+// profile planner they are resolved to metres AMSL (see mission/resolve.ts).
 import type { TurbulenceLevel } from '../sim/types';
 
 export interface Waypoint {
@@ -9,18 +10,7 @@ export interface Waypoint {
   lon: number;
   altM: number; // leg cruise altitude to this point, m AMSL
   loiterMin: number; // station-keeping hold at this point, minutes
-}
-
-export interface RoutePreset {
-  id: string;
-  name: string;
-  region: string;
-  suggestedWeather: string;
-  /** Airfield roles, so the map and the alternate logic know what the route is for. */
-  homeIcao: string;
-  destIcao: string;
-  alternateIcaos: string[];
-  waypoints: Waypoint[];
+  speedMs?: number;
 }
 
 export const EARTH_RADIUS_M = 6371000;
@@ -40,11 +30,11 @@ export function distanceM(lat1: number, lon1: number, lat2: number, lon2: number
 
 /** Initial great-circle bearing from point 1 to point 2, degrees true 0..360. */
 export function bearingDeg(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const φ1 = rad(lat1);
-  const φ2 = rad(lat2);
-  const Δλ = rad(lon2 - lon1);
-  const y = Math.sin(Δλ) * Math.cos(φ2);
-  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+  const p1 = rad(lat1);
+  const p2 = rad(lat2);
+  const dl = rad(lon2 - lon1);
+  const y = Math.sin(dl) * Math.cos(p2);
+  const x = Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl);
   return (deg(Math.atan2(y, x)) + 360) % 360;
 }
 
@@ -104,121 +94,11 @@ export function routeLengthM(wps: Waypoint[]): number {
   return legGeometry(wps).reduce((s, l) => s + l.distM, 0);
 }
 
-let idSeq = 1000;
-export function nextWaypointId(): number {
-  return ++idSeq;
-}
-
 export function renameWaypoints(wps: Waypoint[]): Waypoint[] {
-  // Keep WP names sequential after edits (WP1, WP2, ... except named endpoints).
   return wps.map((w, i) => ({ ...w, name: w.name || `WP${i + 1}` }));
 }
 
-// --- presets -------------------------------------------------------------
-// Illustrative waypoint sets only, laid on real Indian geography: the endpoints
-// are the civil airfields in src/data/airfields.ts and the intermediate points
-// are loiter holds over well-known valleys. Waypoints stay well inside the
-// interior, away from international borders and the Line of Control. Profile
-// times are 6-10 h on the mission fuel load. NOT operational planning data
-// (see ASSUMPTIONS.md).
-
-export const ROUTE_PRESETS: RoutePreset[] = [
-  {
-    id: 'ladakh',
-    name: 'HIGH ALTITUDE',
-    region: 'Indus valley, Ladakh - 3.3-5.4 km AMSL',
-    suggestedWeather: 'hot-high',
-    homeIcao: 'VILH',
-    destIcao: 'VILH',
-    alternateIcaos: ['VISR', 'VIJU', 'VICG'],
-    waypoints: [
-      { id: 1, name: 'LEH', lat: 34.135899, lon: 77.546501, altM: 3256, loiterMin: 0 },
-      { id: 2, name: 'SHAM', lat: 34.116, lon: 77.1, altM: 5200, loiterMin: 180 },
-      { id: 3, name: 'ALCHI', lat: 34.125, lon: 76.792, altM: 5400, loiterMin: 120 },
-      { id: 4, name: 'PHEY', lat: 34.1136, lon: 77.4372, altM: 5000, loiterMin: 60 },
-      { id: 5, name: 'LEH', lat: 34.135899, lon: 77.546501, altM: 3256, loiterMin: 0 },
-    ],
-  },
-  {
-    id: 'rajasthan',
-    name: 'HOT DAY',
-    region: 'Thar desert, Rajasthan - Jodhpur to Jaisalmer',
-    suggestedWeather: 'hot-high',
-    homeIcao: 'VIJO',
-    destIcao: 'VIJR',
-    alternateIcaos: ['VIBK', 'VIJP', 'VAUD', 'VABJ'],
-    waypoints: [
-      { id: 1, name: 'JODHPUR', lat: 26.251101, lon: 73.048897, altM: 219, loiterMin: 0 },
-      { id: 2, name: 'THAR', lat: 26.7, lon: 72.15, altM: 3800, loiterMin: 150 },
-      { id: 3, name: 'POKHRAN', lat: 26.8333, lon: 71.5333, altM: 4000, loiterMin: 120 },
-      { id: 4, name: 'JAISALMER', lat: 26.8887, lon: 70.864998, altM: 229, loiterMin: 90 },
-    ],
-  },
-  {
-    id: 'coastal',
-    name: 'HEADWIND',
-    region: 'West coast - Mumbai to Kochi via Goa and Mangaluru',
-    suggestedWeather: 'headwind',
-    homeIcao: 'VABB',
-    destIcao: 'VOCI',
-    alternateIcaos: ['VOGO', 'VOML', 'VAKP'],
-    waypoints: [
-      { id: 1, name: 'MUMBAI', lat: 19.088699, lon: 72.867897, altM: 12, loiterMin: 0 },
-      { id: 2, name: 'GOA', lat: 15.380062, lon: 73.833328, altM: 3800, loiterMin: 0 },
-      { id: 3, name: 'MANGALURU', lat: 12.95471, lon: 74.886812, altM: 4000, loiterMin: 0 },
-      { id: 4, name: 'KOCHI', lat: 10.151047, lon: 76.400838, altM: 9, loiterMin: 0 },
-    ],
-  },
-];
-
-export function presetById(id: string): RoutePreset | undefined {
-  return ROUTE_PRESETS.find((p) => p.id === id);
-}
-
-export function clonePreset(id: string): Waypoint[] {
-  const p = presetById(id) ?? ROUTE_PRESETS[0];
-  return p.waypoints.map((w) => ({ ...w }));
-}
-
-/**
- * Hand edits are confined to a box around the selected preset's waypoint
- * bounding box, expanded by this many degrees on every side (see ASSUMPTIONS.md).
- */
-export const PRESET_EDIT_MARGIN_DEG = 2;
-
-export interface GeoBox {
-  minLat: number;
-  maxLat: number;
-  minLon: number;
-  maxLon: number;
-}
-
-export function presetEditBox(presetId: string): GeoBox {
-  const p = presetById(presetId) ?? ROUTE_PRESETS[0];
-  const lats = p.waypoints.map((w) => w.lat);
-  const lons = p.waypoints.map((w) => w.lon);
-  const m = PRESET_EDIT_MARGIN_DEG;
-  return {
-    minLat: Math.min(...lats) - m,
-    maxLat: Math.max(...lats) + m,
-    minLon: Math.min(...lons) - m,
-    maxLon: Math.max(...lons) + m,
-  };
-}
-
-/** Clamp a hand-placed point to the preset edit box; reports whether it moved. */
-export function clampToPresetBox(
-  presetId: string,
-  lat: number,
-  lon: number,
-): { lat: number; lon: number; clamped: boolean } {
-  const b = presetEditBox(presetId);
-  const cLat = Math.min(b.maxLat, Math.max(b.minLat, lat));
-  const cLon = Math.min(b.maxLon, Math.max(b.minLon, lon));
-  return { lat: cLat, lon: cLon, clamped: cLat !== lat || cLon !== lon };
-}
-
-/** Interpolated position along a route for the live monitor marker. */
+/** Interpolated position along a route for markers and terrain sampling. */
 export interface TrackPoint {
   lat: number;
   lon: number;

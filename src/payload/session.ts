@@ -5,7 +5,7 @@
 import type { AlternateRow } from '../nav/alternates';
 import { positionAtClock, type MissionPlan } from '../mission/mission';
 import type { Waypoint } from '../mission/route';
-import type { DeniedZone, GroundStation as GroundSite } from '../data/zones';
+import type { GroundStation as GroundSite, Mission, MissionZone } from '../mission/types';
 import { PHASES } from '../sim/constants';
 import type { Snapshot } from '../sim/types';
 import { ENGINE_FAULT_LABELS } from '../sim/faults';
@@ -28,7 +28,7 @@ import {
   rulP10MissionS,
   timeToLossMissionS,
 } from './guard';
-import { poisForPreset, schedulePois } from './pois';
+import { poisForMission, schedulePois } from './pois';
 import type {
   AdversaryOutcome,
   DataGuardDebrief,
@@ -56,11 +56,10 @@ export interface PayloadEvent {
 }
 
 export interface PayloadSessionOptions {
-  presetId: string;
+  /** The mission owns the RECON nodes, zones and ground station. */
+  mission: Mission;
   waypoints: Waypoint[];
   plan: MissionPlan;
-  deniedZone: DeniedZone | undefined;
-  groundStation: GroundSite | undefined;
   emit?: (event: PayloadEvent) => void;
 }
 
@@ -121,8 +120,8 @@ function faultText(diagnosis: Diagnosis): string {
 export class PayloadSession {
   private readonly waypoints: Waypoint[];
   private readonly plan: MissionPlan;
-  private readonly deniedZone: DeniedZone | undefined;
-  private readonly groundSite: GroundSite | undefined;
+  private readonly zones: MissionZone[];
+  private readonly groundSite: GroundSite;
   private readonly emit: ((event: PayloadEvent) => void) | undefined;
   private readonly schedule: ScheduledPoi[];
 
@@ -154,10 +153,14 @@ export class PayloadSession {
   private constructor(options: PayloadSessionOptions) {
     this.waypoints = options.waypoints;
     this.plan = options.plan;
-    this.deniedZone = options.deniedZone;
-    this.groundSite = options.groundStation;
+    this.zones = options.mission.zones;
+    this.groundSite = options.mission.groundStation;
     this.emit = options.emit;
-    this.schedule = schedulePois(poisForPreset(options.presetId), options.plan, options.waypoints);
+    this.schedule = schedulePois(
+      poisForMission(options.mission),
+      options.plan,
+      options.waypoints,
+    );
   }
 
   /** ECDH key exchange, then both ends derive the same AES-256-GCM key. */
@@ -215,9 +218,9 @@ export class PayloadSession {
     const timeToLossS = timeToLossMissionS(rulMission, glideS);
     const lossClock = Math.min(this.plan.totalS, input.missionS + timeToLossS);
     const lossPos = positionAtClock(this.plan, this.waypoints, lossClock);
-    const currentInsideDenied = insideDeniedZone(this.deniedZone, pos.lat, pos.lon);
+    const currentInsideDenied = insideDeniedZone(this.zones, pos.lat, pos.lon);
     const predictedInsideDenied = lossPos
-      ? insideDeniedZone(this.deniedZone, lossPos.lat, lossPos.lon)
+      ? insideDeniedZone(this.zones, lossPos.lat, lossPos.lon)
       : false;
     const pending = this.pendingMB();
     const collected = this.collectedMB();

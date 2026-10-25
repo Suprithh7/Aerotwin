@@ -1,19 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import { PayloadSession } from '../session';
-import { clonePreset, presetById } from '../../mission/route';
+import { cloneTemplate } from '../../data/templates';
+import { resolveWaypoints } from '../../mission/terrain';
 import { planMission } from '../../mission/mission';
-import { applyWeatherPreset } from '../../mission/weather';
-import { groundForPreset, zoneForPreset } from '../../data/zones';
+import { poisForMission, schedulePois } from '../pois';
+import type { WaypointWeather } from '../../mission/weather';
 import type { AlternateRow, AltVerdict } from '../../nav/alternates';
 import type { Diagnosis } from '../../diagnosis/diagnose';
 import type { Snapshot } from '../../sim/types';
 import type { DataGuardDebrief } from '../types';
 
-const preset = presetById('ladakh')!;
-const waypoints = clonePreset('ladakh');
-const weather = applyWeatherPreset(preset.suggestedWeather, waypoints.length);
+const mission = cloneTemplate('ladakh');
+const waypoints = resolveWaypoints(mission);
+const weather: WaypointWeather[] = waypoints.map(() => ({
+  isaDevC: 4,
+  windDirDeg: 250,
+  windSpdMs: 4,
+  gustMs: 6,
+  turb: 'none',
+}));
 const plan = planMission(waypoints, weather);
 const SHAM_MISSION_S = 6000; // middle of the SHAM loiter, inside the denied zone
+const capturedBySham = schedulePois(poisForMission(mission), plan, waypoints).filter(
+  (p) => p.captureAtS !== null && p.captureAtS <= SHAM_MISSION_S,
+).length;
 
 const snap = {
   t: 0,
@@ -49,11 +59,9 @@ function alternate(verdict: AltVerdict, rulMarginS: number | null): AlternateRow
 
 async function makeSession() {
   return PayloadSession.create({
-    presetId: 'ladakh',
+    mission,
     waypoints,
     plan,
-    deniedZone: zoneForPreset('ladakh'),
-    groundStation: groundForPreset('ladakh'),
   });
 }
 
@@ -90,22 +98,30 @@ function expectConserved(d: DataGuardDebrief) {
 describe('Data Guard session', () => {
   it('offloads in priority order, finishes, then erases with every item secured', async () => {
     const session = await makeSession();
-    tick(session, SHAM_MISSION_S); // captures PHEY and both SHAM items
+    tick(session, SHAM_MISSION_S); // every RECON point due by the SHAM hold
     await settle();
 
     tick(session, SHAM_MISSION_S + 10); // 10 s at 2 Mbps = 2.5 MB
     let view = session.getView();
     expect(view.guard.state).toBe('ARMED');
-    expect(view.items).toHaveLength(3);
-    const p1 = view.items.find((it) => it.id === 1)!;
-    expect(p1.priority).toBe(1);
+    expect(view.items).toHaveLength(capturedBySham);
+    const queued = [...view.items].sort(
+      (a, b) => a.priority - b.priority || a.capturedAtS - b.capturedAtS || a.id - b.id,
+    );
+    const p1 = queued[0];
+    expect(p1.priority).toBe(Math.min(...view.items.map((it) => it.priority)));
     expect(p1.status).toBe('SENDING');
     expect(p1.sentMB).toBeCloseTo(2.5, 6);
-    for (const other of view.items.filter((it) => it.id !== 1)) {
+    for (const other of view.items.filter((it) => it.id !== p1.id)) {
       expect(other.sentMB).toBe(0);
     }
 
-    for (let k = 2; k <= 280; k++) tick(session, SHAM_MISSION_S + k * 10);
+    let k = 1;
+    while (session.getView().guard.state !== 'ZEROIZED' && k < 1200) {
+      k++;
+      tick(session, SHAM_MISSION_S + k * 10);
+    }
+    expect(k).toBeLessThan(1200);
     await settle(250);
 
     view = session.getView();
@@ -147,12 +163,12 @@ describe('Data Guard session', () => {
     const revealed = session.getView().adversary;
     expect(revealed?.status).toBe('FAILED');
     expect(revealed!.failed).toBe(revealed!.attempted);
-    expect(revealed!.attempted).toBe(3);
+    expect(revealed!.attempted).toBe(view.items.length);
 
     const debrief = session.getDebrief();
     expect(debrief.lostMB).toBeCloseTo(debrief.collectedMB, 6);
     expect(debrief.securedMB).toBe(0);
-    expect(debrief.recovery?.failed).toBe(3);
+    expect(debrief.recovery?.failed).toBe(view.items.length);
     expectConserved(debrief);
     session.dispose();
   });
@@ -174,7 +190,7 @@ describe('Data Guard session', () => {
     expect(view.items.every((it) => it.status === 'ERASED')).toBe(true);
     const debrief = session.getDebrief();
     expect(debrief.lostMB).toBeCloseTo(debrief.collectedMB, 6);
-    expect(debrief.recovery?.attempted).toBe(3);
+    expect(debrief.recovery?.attempted).toBe(view.items.length);
     expectConserved(debrief);
     session.dispose();
   });

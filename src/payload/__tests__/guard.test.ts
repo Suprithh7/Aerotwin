@@ -12,7 +12,7 @@ import {
   type GuardInput,
 } from '../guard';
 import type { AlternateRow, AltVerdict } from '../../nav/alternates';
-import type { DeniedZone } from '../../data/zones';
+import type { MissionZone } from '../../mission/types';
 
 function row(icao: string, verdict: AltVerdict, rulMarginS: number | null): AlternateRow {
   return {
@@ -79,9 +79,9 @@ describe('denied-area geometry', () => {
 
   it('treats a missing zone as outside', () => {
     expect(insideDeniedZone(undefined, 34.1, 77.1)).toBe(false);
-    const zone = { polygon: square } as DeniedZone;
-    expect(insideDeniedZone(zone, 5, 5)).toBe(true);
-    expect(insideDeniedZone(zone, 50, 50)).toBe(false);
+    const zone = { polygon: square } as MissionZone;
+    expect(insideDeniedZone([zone], 5, 5)).toBe(true);
+    expect(insideDeniedZone([zone], 50, 50)).toBe(false);
   });
 });
 

@@ -1,0 +1,41 @@
+{
+  "id": "ladakh",
+  "name": "LADAKH VALLEY RECON",
+  "region": "Indus valley, Ladakh - 3.3-5.4 km AMSL",
+  "description": "Three station-keeping holds in the Indus valley at 5 km, on the edge of the density-altitude ceiling. Illustrative geography only.",
+  "engineProfileId": "nominal",
+  "startTimeUTC": "2026-10-25T02:30:00.000Z",
+  "templateId": "ladakh",
+  "illustrative": true,
+  "weatherMode": "forecast",
+  "groundStation": { "lat": 34.08, "lon": 77.35 },
+  "zones": [
+    {
+      "id": 1,
+      "name": "LEH VALLEY DENIED AREA",
+      "type": "DENIED",
+      "polygon": [
+        [77.03, 34.06],
+        [77.22, 34.06],
+        [77.23, 34.15],
+        [77.04, 34.15],
+        [77.03, 34.06]
+      ]
+    }
+  ],
+  "customSites": [
+    { "id": 1, "name": "LEH VALLEY STRIP", "type": "STRIP", "lat": 34.1, "lon": 77.4, "elevM": 3300 }
+  ],
+  "nodes": [
+    { "id": 1, "type": "LAUNCH", "name": "LEH", "lat": 34.135899, "lon": 77.546501, "alt": 3256, "altRef": "AMSL", "loiterMin": 0 },
+    { "id": 2, "type": "RECON", "name": "SPITUK", "lat": 34.143, "lon": 77.47, "alt": 5000, "altRef": "AMSL", "loiterMin": 0 },
+    { "id": 3, "type": "RECON", "name": "INDUS BEND", "lat": 34.128, "lon": 77.33, "alt": 5100, "altRef": "AMSL", "loiterMin": 30 },
+    { "id": 4, "type": "RECON", "name": "SHAM", "lat": 34.116, "lon": 77.1, "alt": 5200, "altRef": "AMSL", "loiterMin": 180 },
+    { "id": 10, "type": "WAYPOINT", "name": "INDUS PASS", "lat": 34.11825, "lon": 77.023, "alt": 5580, "altRef": "AMSL", "loiterMin": 0 },
+    { "id": 5, "type": "LOITER", "name": "ALCHI", "lat": 34.125, "lon": 76.792, "alt": 5400, "altRef": "AMSL", "loiterMin": 120 },
+    { "id": 6, "type": "RECON", "name": "ALCHI RIDGE", "lat": 34.106, "lon": 76.83, "alt": 5350, "altRef": "AMSL", "loiterMin": 0 },
+    { "id": 9, "type": "WAYPOINT", "name": "STOK PASS", "lat": 34.10866, "lon": 77.04252, "alt": 5660, "altRef": "AMSL", "loiterMin": 0 },
+    { "id": 7, "type": "RECON", "name": "PHEY", "lat": 34.1136, "lon": 77.4372, "alt": 5000, "altRef": "AMSL", "loiterMin": 60 },
+    { "id": 8, "type": "LAND", "name": "LEH", "lat": 34.135899, "lon": 77.546501, "alt": 3256, "altRef": "AMSL", "loiterMin": 0 }
+  ]
+}

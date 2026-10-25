@@ -7,10 +7,10 @@ import type { ScenarioId, ScenarioScript } from './types';
  * the twin's disagreement is a false alarm (see ASSUMPTIONS.md).
  *
  * Data Guard cards use severity 0.6 on cylinder 3: the twin flags around 32 s
- * (mission ~1 h 50 min, over SHAM), while the measured CHT stays below 135 C
- * through the 120 s rehearsal. The friendly-area card injects the same fault at
- * 57 % of the route (in the Alchi hold); the compressed 30 s ramp is detected
- * ~1 h 50 min later, over PHEY, after the aircraft has left the denied area.
+ * into the compressed rehearsal, while the measured CHT stays below 135 C
+ * through all 120 s. The friendly-area card injects the same fault at 57 % of
+ * the route; detection follows after the aircraft has left the denied area, so
+ * a reachable alternate keeps the data encrypted onboard.
  */
 export const SCENARIO_SCRIPTS: ScenarioScript[] = [
   {
@@ -56,7 +56,7 @@ export const SCENARIO_SCRIPTS: ScenarioScript[] = [
     id: 'cooling-friendly',
     title: 'FAILURE OVER FRIENDLY AREA',
     blurb:
-      'The same cooling failure late in the route, detected over Phey near Leh. A friendly alternate is reachable: data stays encrypted onboard and the offload continues.',
+      'The same cooling failure late in the route, after the aircraft has left the denied area. A friendly alternate is reachable: data stays encrypted onboard and the offload continues.',
     sensorOnly: false,
     triggerFrac: 0.57,
     fault: {

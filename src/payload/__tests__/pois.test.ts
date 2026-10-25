@@ -1,17 +1,29 @@
 import { describe, expect, it } from 'vitest';
-import { CAPTURE_RADIUS_M, poisForPreset, schedulePois } from '../pois';
+import { CAPTURE_RADIUS_M, poisForMission, schedulePois } from '../pois';
 import { DUMMY_SCALE, buildDummyPayload, dummyPayloadBytes, previewDummyPayload } from '../dummy';
-import { clonePreset, distanceM, presetById } from '../../mission/route';
+import { cloneTemplate } from '../../data/templates';
+import { resolveWaypoints } from '../../mission/terrain';
+import { distanceM } from '../../mission/route';
 import { planMission, positionAtClock } from '../../mission/mission';
-import { applyWeatherPreset } from '../../mission/weather';
+import type { WaypointWeather } from '../../mission/weather';
 import type { PoiSpec } from '../types';
 
-const PRESETS = ['ladakh', 'rajasthan', 'coastal'];
+const TEMPLATES = ['ladakh', 'rajasthan', 'coastal'];
 
-function planFor(presetId: string) {
-  const wps = clonePreset(presetId);
-  const wx = applyWeatherPreset(presetById(presetId)!.suggestedWeather, wps.length);
-  return { wps, plan: planMission(wps, wx) };
+function weatherFor(n: number): WaypointWeather[] {
+  return Array.from({ length: n }, () => ({
+    isaDevC: 0,
+    windDirDeg: 250,
+    windSpdMs: 5,
+    gustMs: 7,
+    turb: 'none' as const,
+  }));
+}
+
+function planFor(templateId: string) {
+  const mission = cloneTemplate(templateId);
+  const wps = resolveWaypoints(mission);
+  return { mission, wps, plan: planMission(wps, weatherFor(wps.length)) };
 }
 
 function checkBounds(poi: PoiSpec) {
@@ -23,21 +35,24 @@ function checkBounds(poi: PoiSpec) {
 }
 
 describe('recon points of interest', () => {
-  it('gives each preset five deterministic items', () => {
-    for (const presetId of PRESETS) {
-      const a = poisForPreset(presetId);
-      const b = poisForPreset(presetId);
-      expect(a, presetId).toHaveLength(5);
-      expect(new Set(a.map((p) => p.id)).size).toBe(5);
+  it('gives each template one deterministic item per recon node', () => {
+    for (const templateId of TEMPLATES) {
+      const mission = cloneTemplate(templateId);
+      const recon = mission.nodes.filter((n) => n.type === 'RECON').length;
+      const a = poisForMission(mission);
+      const b = poisForMission(mission);
+      expect(a, templateId).toHaveLength(recon);
+      expect(recon, templateId).toBe(5);
+      expect(new Set(a.map((p) => p.id)).size).toBe(recon);
       a.forEach(checkBounds);
       expect(b).toEqual(a);
-      expect(poisForPreset('unknown')).toEqual([]);
+      expect(poisForMission({ ...mission, nodes: mission.nodes.map((n) => ({ ...n, type: 'WAYPOINT' as const })) })).toEqual([]);
     }
   });
 
   it('schedules a capture for every site within the mission', () => {
-    const { wps, plan } = planFor('ladakh');
-    const scheduled = schedulePois(poisForPreset('ladakh'), plan, wps);
+    const { mission, wps, plan } = planFor('ladakh');
+    const scheduled = schedulePois(poisForMission(mission), plan, wps);
     expect(scheduled).toHaveLength(5);
     for (const poi of scheduled) {
       expect(poi.captureAtS, `poi ${poi.id}`).not.toBeNull();
@@ -47,8 +62,8 @@ describe('recon points of interest', () => {
   });
 
   it('captures inside the 3 km radius and not before', () => {
-    const { wps, plan } = planFor('ladakh');
-    const scheduled = schedulePois(poisForPreset('ladakh'), plan, wps);
+    const { mission, wps, plan } = planFor('ladakh');
+    const scheduled = schedulePois(poisForMission(mission), plan, wps);
     for (const poi of scheduled) {
       const at = positionAtClock(plan, wps, poi.captureAtS!);
       expect(at).not.toBeNull();
@@ -58,8 +73,8 @@ describe('recon points of interest', () => {
   });
 
   it('returns no captures for an unplannable route', () => {
-    const { plan } = planFor('ladakh');
-    const scheduled = schedulePois(poisForPreset('ladakh'), plan, []);
+    const { mission, plan } = planFor('ladakh');
+    const scheduled = schedulePois(poisForMission(mission), plan, []);
     expect(scheduled.every((p) => p.captureAtS === null)).toBe(true);
     expect(schedulePois([], plan, [])).toEqual([]);
   });

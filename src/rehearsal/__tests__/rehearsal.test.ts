@@ -21,17 +21,8 @@ import {
   outcomeHeadline,
   weatherSentence,
 } from '../metrics';
-import {
-  DENIED_LABEL,
-  DENIED_ZONES,
-  GROUND_STATIONS,
-  groundForPreset,
-  zoneForPreset,
-  zoneLabelPoint,
-} from '../../data/zones';
-import { presetById } from '../../mission/route';
-import { applyWeatherPreset } from '../../mission/weather';
-import type { Diagnosis } from '../../diagnosis/diagnose';
+import { MISSION_TEMPLATES } from '../../data/templates';
+import { pointInRing } from '../../mission/geometry';import type { Diagnosis } from '../../diagnosis/diagnose';
 import type { ScenarioId, RehearsalEvent } from '../types';
 import type { ChannelReading, Snapshot } from '../../sim/types';
 
@@ -290,9 +281,15 @@ describe('debrief metrics', () => {
   });
 
   it('makes a plain weather sentence from the selected cells', () => {
-    const cells = applyWeatherPreset('hot-high', 5);
-    expect(weatherSentence(cells, 'hot-high')).toBe(
-      'Hot and high: air temperature +12 to +18 C relative to ISA, wind 6 to 10 m/s from the south-west, severe turbulence at the worst point.',
+    const cells = Array.from({ length: 5 }, (_, i) => ({
+      isaDevC: 12 + i,
+      windDirDeg: 225,
+      windSpdMs: 6 + i,
+      gustMs: 8 + i,
+      turb: (i === 4 ? 'severe' : 'moderate') as 'severe' | 'moderate',
+    }));
+    expect(weatherSentence(cells, 'Hot and high')).toBe(
+      'Hot and high: air temperature +12 to +16 C relative to ISA, wind 6 to 10 m/s from the south-west, severe turbulence at the worst point.',
     );
   });
 
@@ -306,46 +303,27 @@ describe('debrief metrics', () => {
   });
 });
 
-describe('exercise geography', () => {
-  function inside(lat: number, lon: number, ring: [number, number][]): boolean {
-    let hit = false;
-    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-      const [xi, yi] = ring[i];
-      const [xj, yj] = ring[j];
-      if (yi > lat !== yj > lat && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) hit = !hit;
-    }
-    return hit;
-  }
-
-  it('labels the exercise area with its fixed caption', () => {
-    expect(DENIED_LABEL).toBe('DENIED AREA (EXERCISE - ILLUSTRATIVE)');
-  });
-
-  it('places one closed denied area inside each preset region', () => {
-    expect(DENIED_ZONES).toHaveLength(3);
-    for (const zone of DENIED_ZONES) {
-      expect(presetById(zone.presetId), zone.id).toBeDefined();
-      expect(zone.polygon[0]).toEqual(zone.polygon[zone.polygon.length - 1]);
-      expect(zone.polygon.length).toBeGreaterThanOrEqual(4);
-      for (const [lon, lat] of zone.polygon) {
-        expect(lon).toBeGreaterThan(68);
-        expect(lon).toBeLessThan(98);
-        expect(lat).toBeGreaterThan(6);
-        expect(lat).toBeLessThan(36);
+describe('template geography', () => {
+  it('carries illustrative but valid closed zones and a ground station', () => {
+    expect(MISSION_TEMPLATES.length).toBeGreaterThanOrEqual(5);
+    for (const template of MISSION_TEMPLATES) {
+      expect(template.illustrative, template.id).toBe(true);
+      const gs = template.groundStation;
+      expect(gs.lat).toBeGreaterThan(6);
+      expect(gs.lat).toBeLessThan(36);
+      expect(gs.lon).toBeGreaterThan(68);
+      expect(gs.lon).toBeLessThan(98);
+      for (const zone of template.zones) {
+        const ring = zone.polygon;
+        expect(ring.length, `${template.id}/${zone.id}`).toBeGreaterThanOrEqual(4);
+        expect(ring[0]).toEqual(ring[ring.length - 1]);
+        const lat = ring.slice(0, -1).reduce((s, p) => s + p[1], 0) / (ring.length - 1);
+        const lon = ring.slice(0, -1).reduce((s, p) => s + p[0], 0) / (ring.length - 1);
+        expect(pointInRing(lon, lat, ring), `${template.id}/${zone.id}`).toBe(true);
       }
-      const label = zoneLabelPoint(zone);
-      expect(inside(label.lat, label.lon, zone.polygon)).toBe(true);
+      expect(template.nodes.length).toBeGreaterThanOrEqual(2);
+      expect(template.nodes[0].type).toBe('LAUNCH');
+      expect(template.nodes[template.nodes.length - 1].type).toBe('LAND');
     }
-  });
-
-  it('places one ground station per preset with unique ids', () => {
-    expect(GROUND_STATIONS).toHaveLength(3);
-    expect(new Set(GROUND_STATIONS.map((g) => g.id)).size).toBe(3);
-    for (const presetId of ['ladakh', 'rajasthan', 'coastal']) {
-      expect(zoneForPreset(presetId), presetId).toBeDefined();
-      expect(groundForPreset(presetId), presetId).toBeDefined();
-    }
-    expect(zoneForPreset('missing')).toBeUndefined();
-    expect(groundForPreset('missing')).toBeUndefined();
   });
 });

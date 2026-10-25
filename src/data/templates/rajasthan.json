@@ -1,0 +1,39 @@
+{
+  "id": "rajasthan",
+  "name": "THAR DESERT TRANSIT",
+  "region": "Thar desert, Rajasthan - Jodhpur to Jaisalmer",
+  "description": "Desert transit with station-keeping holds in high-density-altitude heat. Illustrative geography only.",
+  "engineProfileId": "nominal",
+  "startTimeUTC": "2026-10-25T04:00:00.000Z",
+  "templateId": "rajasthan",
+  "illustrative": true,
+  "weatherMode": "forecast",
+  "groundStation": { "lat": 26.33, "lon": 73.1 },
+  "zones": [
+    {
+      "id": 1,
+      "name": "THAR DENIED AREA",
+      "type": "DENIED",
+      "polygon": [
+        [71.84, 26.37],
+        [72.07, 26.36],
+        [72.09, 26.52],
+        [71.86, 26.54],
+        [71.84, 26.37]
+      ]
+    }
+  ],
+  "customSites": [
+    { "id": 1, "name": "THAR STRIP", "type": "STRIP", "lat": 26.62, "lon": 72.3, "elevM": 220 }
+  ],
+  "nodes": [
+    { "id": 1, "type": "LAUNCH", "name": "JODHPUR", "lat": 26.251101, "lon": 73.048897, "alt": 219, "altRef": "AMSL", "loiterMin": 0 },
+    { "id": 2, "type": "RECON", "name": "THAR EAST", "lat": 26.55, "lon": 72.55, "alt": 3600, "altRef": "AMSL", "loiterMin": 0 },
+    { "id": 3, "type": "RECON", "name": "THAR", "lat": 26.7, "lon": 72.15, "alt": 3800, "altRef": "AMSL", "loiterMin": 150 },
+    { "id": 4, "type": "RECON", "name": "THAR WEST", "lat": 26.78, "lon": 71.85, "alt": 3900, "altRef": "AMSL", "loiterMin": 0 },
+    { "id": 5, "type": "LOITER", "name": "POKHRAN", "lat": 26.8333, "lon": 71.5333, "alt": 4000, "altRef": "AMSL", "loiterMin": 120 },
+    { "id": 6, "type": "RECON", "name": "POKHRAN RANGE", "lat": 26.84, "lon": 71.6, "alt": 3950, "altRef": "AMSL", "loiterMin": 0 },
+    { "id": 7, "type": "RECON", "name": "JAISALMER", "lat": 26.8887, "lon": 70.864998, "alt": 229, "altRef": "AMSL", "loiterMin": 90 },
+    { "id": 8, "type": "LAND", "name": "JAISALMER", "lat": 26.8887, "lon": 70.864998, "alt": 229, "altRef": "AMSL", "loiterMin": 0 }
+  ]
+}

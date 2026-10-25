@@ -36,6 +36,7 @@ function fieldDueNorth(origin: { lat: number; lon: number }, distM: number, elev
     lat: origin.lat + distM / M_PER_DEG,
     lon: origin.lon,
     elevationM,
+    type: 'small_airport',
   };
 }
 

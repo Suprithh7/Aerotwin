@@ -7,9 +7,9 @@ import {
   linkStatus,
   radioHorizonKm,
 } from '../link';
-import type { GroundStation } from '../../data/zones';
+import type { GroundStation } from '../../mission/types';
 
-const GS: GroundStation = { id: 'test-gs', presetId: 'ladakh', name: 'TEST', lat: 34.08, lon: 77.35 };
+const GS: GroundStation = { lat: 34.08, lon: 77.35 };
 
 function at(lat: number, lon: number, altM = 5200, jammed = false) {
   return linkStatus({ lat, lon, altM, gs: GS, jammed });

@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import RehearsalMap from './RehearsalMap';
 import DataGuardHud from './DataGuardHud';
+import EngineGauges, { type GaugeReading } from './EngineGauges';
 import { SyntheticChip } from './StageHeader';
 import { useSimStore, type SimStore } from '../../state/store';
 import { currentPlan, missionClockPosition, useMissionStore } from '../../mission/missionStore';
-import { activeAirfields, useAlternates } from '../../nav/useAlternates';
+import { resolveWaypoints } from '../../mission/terrain';
+import { engineProfileById, type GaugeId } from '../../mission/types';
+import { useAlternates } from '../../nav/useAlternates';
 import type { AlternateRow } from '../../nav/alternates';
 import { useRehearsalStore } from '../../rehearsal/store';
 import {
@@ -17,29 +20,22 @@ import { buildDebrief, lifeDoseIncrement } from '../../rehearsal/metrics';
 import { scriptById } from '../../rehearsal/scripts';
 import { PayloadSession } from '../../payload/session';
 import type { PayloadView } from '../../payload/types';
-import { groundForPreset, zoneForPreset } from '../../data/zones';
-import { thermalColor } from '../../sim/uiMeta';
-import {
-  CHT_CAUTION_C,
-  CHT_LIMIT_C,
-  CHT_NOMINAL_C,
-} from '../../sim/limits';
 import type { Outcome } from '../../rehearsal/types';
 
 const LIMIT_HOLD_MS = 2400;
 const TICKER_MS = 8000;
 
 const STATE_COLOR: Record<HudState, string> = {
-  NOMINAL: 'text-steel',
-  ADVISORY: 'text-amber',
-  WARNING: 'text-amber',
-  CRITICAL: 'text-red',
+  NOMINAL: 'var(--ok)',
+  ADVISORY: 'var(--caution)',
+  WARNING: 'var(--caution)',
+  CRITICAL: 'var(--critical)',
 };
 
-const VERDICT_COLOR: Record<string, string> = {
-  REACHABLE: 'text-steel',
-  MARGINAL: 'text-amber',
-  'NOT REACHABLE': 'text-red',
+const VERDICT_MARK: Record<string, string> = {
+  REACHABLE: 'var(--ok)',
+  MARGINAL: 'var(--caution)',
+  'NOT REACHABLE': 'var(--critical)',
 };
 
 interface RunState {
@@ -104,13 +100,20 @@ function Ticker() {
             className="flex items-baseline gap-2 py-0.5"
             style={{ opacity, transition: 'opacity 400ms linear' }}
           >
-            <span className="num shrink-0 font-mono text-[12px] text-dim">
+            <span className="num shrink-0 font-mono text-[11px] text-ink-3">
               T+{fmtClock(e.missionS)}
             </span>
             <span
-              className={`text-[13px] leading-4 ${
-                e.tone === 'alert' ? 'text-red' : e.tone === 'caution' ? 'text-amber' : 'text-txt'
-              }`}
+              className="text-[12px] leading-4 text-ink"
+              style={{
+                borderLeft:
+                  e.tone === 'alert'
+                    ? '3px solid var(--critical)'
+                    : e.tone === 'caution'
+                      ? '3px solid var(--caution)'
+                      : '3px solid transparent',
+                paddingLeft: e.tone === 'info' ? 0 : 6,
+              }}
             >
               {e.text}
             </span>
@@ -121,37 +124,10 @@ function Ticker() {
   );
 }
 
-function Bar({
-  label,
-  value,
-  max,
-  unit,
-  digits,
-}: {
-  label: string;
-  value: number | null;
-  max: number;
-  unit: string;
-  digits: number;
-}) {
-  const pct = value === null ? 0 : Math.max(0, Math.min(100, (value / max) * 100));
-  return (
-    <div className="grid grid-cols-[62px_minmax(0,1fr)_70px] items-center gap-2">
-      <span className="font-mono text-[12px] uppercase tracking-[0.06em] text-dim">{label}</span>
-      <div className="h-1.5 border border-edge bg-bg">
-        <div className="h-full bg-data" style={{ width: `${pct}%` }} />
-      </div>
-      <span className="num text-right font-mono text-[13px] text-txt">
-        {value === null ? '--' : value.toFixed(digits)} {unit}
-      </span>
-    </div>
-  );
-}
-
 export default function FlyStage() {
-  const waypoints = useMissionStore((s) => s.waypoints);
+  const mission = useMissionStore((s) => s.mission);
   const weather = useMissionStore((s) => s.weather);
-  const presetId = useMissionStore((s) => s.routePresetId);
+  const waypoints = useMemo(() => resolveWaypoints(mission), [mission]);
   const scenarioId = useRehearsalStore((s) => s.scenarioId);
   const epochTarget = useRehearsalStore((s) => s.epochTarget);
 
@@ -165,7 +141,6 @@ export default function FlyStage() {
 
   const script = useMemo(() => scriptById(scenarioId), [scenarioId]);
   const plan = useMemo(() => currentPlan(waypoints, weather), [waypoints, weather]);
-  const fields = useMemo(() => activeAirfields(presetId, waypoints), [presetId, waypoints]);
 
   const [armed, setArmed] = useState(false);
   const [injected, setInjected] = useState(false);
@@ -173,8 +148,8 @@ export default function FlyStage() {
   const [payloadError, setPayloadError] = useState<string | null>(null);
   const [jammed, setJammed] = useState(false);
 
-  const ctxRef = useRef({ plan, script, waypoints, weather });
-  ctxRef.current = { plan, script, waypoints, weather };
+  const ctxRef = useRef({ mission, plan, script, waypoints, weather });
+  ctxRef.current = { mission, plan, script, waypoints, weather };
   const runRef = useRef<RunState | null>(null);
   const sessionRef = useRef<PayloadSession | null>(null);
   const jammedRef = useRef(false);
@@ -222,11 +197,9 @@ export default function FlyStage() {
     setJammed(scriptJam);
 
     void PayloadSession.create({
-      presetId,
+      mission: ctxRef.current.mission,
       waypoints: ctxRef.current.waypoints,
       plan: ctxRef.current.plan,
-      deniedZone: zoneForPreset(presetId),
-      groundStation: groundForPreset(presetId),
       emit: (event) => {
         useRehearsalStore.getState().pushEvent({
           missionS: event.missionS,
@@ -399,7 +372,7 @@ export default function FlyStage() {
       sessionRef.current?.dispose();
       sessionRef.current = null;
     };
-  }, [epochTarget, presetId]);
+  }, [epochTarget, mission.id]);
 
   const ready = armed && simEpoch >= epochTarget;
   const shownSnap = ready ? snap : null;
@@ -411,28 +384,40 @@ export default function FlyStage() {
     const p = missionClockPosition(waypoints, weather, missionS);
     return p ? { lat: p.lat, lon: p.lon, legIndex: p.legIndex } : null;
   }, [ready, missionS, waypoints, weather]);
-  const nav = useAlternates(pos, fields);
+  const nav = useAlternates(pos, mission);
   const nearest = nav.nearest;
   navRowsRef.current = nav.rows;
 
   const hud = hudStatus(shownSnap, diagnosis, script, injected);
   const r = shownSnap?.readings;
   const chts = [r?.cht1.measured, r?.cht2.measured, r?.cht3.measured, r?.cht4.measured];
+  const twinChts = [r?.cht1.twin, r?.cht2.twin, r?.cht3.twin, r?.cht4.twin];
   const hottestCht = chts.every((v) => v === undefined)
     ? null
     : Math.max(...chts.map((v) => v ?? -Infinity));
+  const hottestTwin = twinChts.every((v) => v === undefined)
+    ? null
+    : Math.max(...twinChts.map((v) => v ?? -Infinity));
+  const profile = engineProfileById(mission.engineProfileId);
+  const gaugeReadings: Record<GaugeId, GaugeReading> = {
+    rpm: { value: r?.rpm.measured ?? null, expected: r?.rpm.twin ?? null },
+    cht: { value: hottestCht, expected: hottestTwin },
+    oilP: { value: r?.oilP.measured ?? null, expected: r?.oilP.twin ?? null },
+    oilT: { value: r?.oilT.measured ?? null, expected: r?.oilT.twin ?? null },
+    fuel: { value: r?.fuel.measured ?? null, expected: r?.fuel.twin ?? null },
+  };
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-bg font-sans text-txt">
+    <div className="relative h-full w-full overflow-hidden bg-paper font-sans text-ink">
       <div className="absolute inset-0">
         <RehearsalMap
+          mission={mission}
           waypoints={waypoints}
           weather={weather}
-          presetId={presetId}
           clockS={ready ? missionS : null}
           showMarker
           height="100%"
-          fitPadding={{ top: 96, right: 380, bottom: 96, left: 120 }}
+          fitPadding={{ top: 120, right: 380, bottom: 220, left: 120 }}
         />
       </div>
 
@@ -440,7 +425,8 @@ export default function FlyStage() {
         <div className="absolute left-4 top-4 max-w-[420px]">
           <div className="hud-panel px-3 py-2">
             <div
-              className={`font-mono text-[28px] uppercase leading-[32px] tracking-[0.04em] ${STATE_COLOR[hud.state]}`}
+              className="font-mono text-[28px] uppercase leading-[32px] tracking-[0.04em]"
+              style={{ color: STATE_COLOR[hud.state] }}
             >
               {hud.state}
             </div>
@@ -455,28 +441,22 @@ export default function FlyStage() {
         <div className="pointer-events-auto absolute right-4 top-4 flex items-center gap-2">
           <div className="hud-panel flex items-center gap-2 px-3 py-2">
             <div className="flex flex-col">
-              <span className="font-mono text-[12px] uppercase leading-4 tracking-[0.06em] text-dim">
-                MISSION CLOCK
-              </span>
-              <span className="num font-mono text-[13px] leading-5 text-txt">
+              <span className="font-mono text-[10px] leading-4 text-ink-3">Mission clock</span>
+              <span className="num font-mono text-[13px] leading-5 text-ink">
                 {fmtClock(missionS)}
               </span>
             </div>
             <button
-              className={`h-7 px-2 font-mono text-[12px] uppercase ${
-                paused ? 'border-amber text-amber' : 'text-txt'
-              }`}
+              className={`h-7 px-2 font-mono text-[11px] ${paused ? 'active' : ''}`}
               onClick={togglePause}
             >
-              {paused ? 'RESUME' : 'PAUSE'}
+              {paused ? 'Resume' : 'Pause'}
             </button>
             <div className="flex gap-1">
               {[1, 10, 60].map((v) => (
                 <button
                   key={v}
-                  className={`h-7 px-2 font-mono text-[12px] ${
-                    speed === v ? 'border-steel text-steel' : 'text-dim'
-                  }`}
+                  className={`h-7 px-2 font-mono text-[11px] ${speed === v ? 'active' : ''}`}
                   onClick={() => setSpeed(v)}
                 >
                   {v}x
@@ -487,59 +467,43 @@ export default function FlyStage() {
         </div>
 
         <div className="absolute bottom-8 left-4">
-          <div className="hud-panel flex w-[312px] flex-col gap-2 px-3 py-2">
-            <div className="grid grid-cols-4 gap-1">
-              {chts.map((v, i) => {
-                const color =
-                  v === undefined
-                    ? '#232A33'
-                    : thermalColor(v, CHT_NOMINAL_C, CHT_CAUTION_C, CHT_LIMIT_C);
-                return (
-                  <div
-                    key={i}
-                    className="flex h-10 flex-col items-center justify-center"
-                    style={{ backgroundColor: color }}
-                  >
-                    <span className="font-mono text-[12px] leading-4 text-bg">C{i + 1}</span>
-                    <span className="num font-mono text-[13px] leading-4 text-bg">
-                      {v === undefined ? '--' : Math.round(v)} C
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-            <Bar label="OIL PRESS" value={r ? r.oilP.measured : null} max={6} unit="bar" digits={1} />
-            <Bar label="CHT HOT" value={hottestCht} max={CHT_LIMIT_C} unit="C" digits={0} />
-            <Bar label="BOOST" value={r ? r.boost.measured : null} max={100} unit="kPa" digits={0} />
-          </div>
+          <EngineGauges
+            gauges={profile.gauges}
+            readings={gaugeReadings}
+            cylinderCht={chts.map((v) => v ?? null)}
+          />
         </div>
 
         <div className="absolute right-4 top-[78px]">
           <div className="hud-panel w-[248px] px-3 py-2">
-            <div className="font-mono text-[12px] uppercase tracking-[0.06em] text-dim">
-              NEAREST LANDING
-            </div>
+            <div className="panel-title">Nearest landing</div>
             {nearest ? (
               <>
                 <div className="mt-1 flex items-baseline justify-between gap-2">
-                  <span className="font-mono text-[13px] tracking-[0.06em] text-txt">
+                  <span className="font-mono text-[13px] tracking-[0.04em] text-ink">
                     {nearest.airfield.icao}
                   </span>
-                  <span className={`font-mono text-[12px] ${VERDICT_COLOR[nearest.verdict] ?? 'text-dim'}`}>
+                  <span className="flex items-center gap-1.5 font-mono text-[11px] text-ink">
+                    <span
+                      className="h-2 w-2"
+                      style={{
+                        backgroundColor: VERDICT_MARK[nearest.verdict] ?? 'var(--ink-3)',
+                      }}
+                    />
                     {nearest.verdict}
                   </span>
                 </div>
-                <div className="mt-0.5 flex items-baseline justify-between gap-2 font-mono text-[12px] text-dim">
+                <div className="mt-0.5 flex items-baseline justify-between gap-2 font-mono text-[11px] text-ink-3">
                   <span>
-                    <span className="num text-txt">{(nearest.distM / 1000).toFixed(1)}</span> km
+                    <span className="num text-ink">{(nearest.distM / 1000).toFixed(1)}</span> km
                   </span>
                   <span>
-                    ETE <span className="num text-txt">{(nearest.eteS / 60).toFixed(1)}</span> min
+                    ETE <span className="num text-ink">{(nearest.eteS / 60).toFixed(1)}</span> min
                   </span>
                 </div>
               </>
             ) : (
-              <div className="mt-1 font-mono text-[12px] text-dim">ASSESSING</div>
+              <div className="mt-1 font-mono text-[11px] text-ink-3">Assessing</div>
             )}
           </div>
         </div>
@@ -547,7 +511,7 @@ export default function FlyStage() {
         <div className="pointer-events-auto absolute bottom-8 right-4">
           <DataGuardHud
             view={payloadView}
-            groundName={groundForPreset(presetId)?.name ?? 'GROUND STATION'}
+            groundName="Mission ground station"
             error={payloadError}
             jammed={jammed}
             onToggleJam={() => {
@@ -562,7 +526,7 @@ export default function FlyStage() {
           />
         </div>
 
-        <div className="absolute bottom-8 left-1/2 -translate-x-1/2">
+        <div className="absolute left-1/2 top-12 -translate-x-1/2">
           <Ticker />
         </div>
       </div>

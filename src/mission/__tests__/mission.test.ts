@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   bearingDeg,
   buildTrack,
-  clonePreset,
   distanceM,
   groundspeedMs,
   legGeometry,
@@ -10,7 +9,14 @@ import {
   windComponents,
   type Waypoint,
 } from '../route';
-import { applyWeatherPreset, fetchLiveWeather, isaDevFromSurface, type WaypointWeather } from '../weather';
+import {
+  fetchForecast,
+  isaDevFromSurface,
+  weatherOnLeg,
+  type WaypointWeather,
+} from '../weather';
+import { cloneTemplate } from '../../data/templates';
+import { resolveWaypoints } from '../terrain';
 import {
   MISSION_AIRSPEED,
   MIN_GROUNDSPEED_MS,
@@ -27,6 +33,21 @@ import { createDerived, nominalParams, stepEngine, stepEngineInto, type EngineIn
 import { settledEngineState } from '../../sim/sim';
 
 const CRUISE_TAS = MISSION_AIRSPEED.cruise;
+
+function weatherFor(
+  n: number,
+  isaDevC = 0,
+  windSpdMs = 5,
+  windDirDeg = 250,
+  turb: WaypointWeather['turb'] = 'light',
+): WaypointWeather[] {
+  return Array.from({ length: n }, () => ({ isaDevC, windDirDeg, windSpdMs, gustMs: windSpdMs + 2, turb }));
+}
+
+function templateRoute(id: string) {
+  const mission = cloneTemplate(id);
+  return { mission, wps: resolveWaypoints(mission) };
+}
 
 describe('route geometry', () => {
   it('matches a known great-circle quarter arc', () => {
@@ -56,7 +77,7 @@ describe('route geometry', () => {
   });
 
   it('builds a monotonic track that interpolates back to the waypoints', () => {
-    const wps = clonePreset('rajasthan');
+    const wps = templateRoute('rajasthan').wps;
     const track = buildTrack(wps);
     expect(track[0].cumM).toBe(0);
     expect(track[track.length - 1].cumM).toBeCloseTo(legGeometry(wps).reduce((s, l) => s + l.distM, 0), 3);
@@ -85,7 +106,7 @@ describe('wind and groundspeed', () => {
       { id: 2, name: 'B', lat: 26.9, lon: 71.9, altM: 3000, loiterMin: 0 },
     ];
     const geo = legGeometry(wps);
-    const calm = planMission(wps, applyWeatherPreset('standard', 2).map((w) => ({ ...w, windSpdMs: 0 })));
+    const calm = planMission(wps, weatherFor(2, 0, 0));
     expect(calm.legs[0].gsMs).toBeCloseTo(CRUISE_TAS, 6);
     expect(calm.legs[0].timeS).toBeCloseTo(geo[0].distM / CRUISE_TAS, 3);
 
@@ -123,92 +144,93 @@ describe('weather mapping', () => {
     expect(isaDevFromSurface(2, 3500)).toBeCloseTo(9.75, 2);
   });
 
-  it('spreads presets over the requested waypoint count', () => {
-    const wx = applyWeatherPreset('hot-high', 9);
-    expect(wx).toHaveLength(9);
-    expect(wx[8].isaDevC).toBe(wx[5].isaDevC);
+  it('interpolates the wind vector and keeps the worse turbulence', () => {
+    const a: WaypointWeather = { isaDevC: 0, windDirDeg: 270, windSpdMs: 10, gustMs: 12, turb: 'light' };
+    const b: WaypointWeather = { isaDevC: 10, windDirDeg: 90, windSpdMs: 10, gustMs: 20, turb: 'moderate' };
+    const mid = weatherOnLeg([a, b], 0, 0.5);
+    expect(mid.isaDevC).toBeCloseTo(5, 6);
+    expect(mid.windSpdMs).toBeCloseTo(0, 6);
+    expect(mid.turb).toBe('moderate');
   });
 });
 
 describe('live weather fetch', () => {
-  const PRESET: WaypointWeather[] = [
-    { isaDevC: 7, windDirDeg: 250, windSpdMs: 12, gustMs: 20, turb: 'moderate' },
-  ];
+  const START = '2026-10-25T12:00:00.000Z';
 
-  it('maps a station report to ISA deviation and gust bands, then serves the cache', async () => {
-    const wp: Waypoint = { id: 1, name: 'A', lat: 10.1234, lon: 70.5678, altM: 300, loiterMin: 0 };
-    const calls: number[] = [];
+  it('maps the hourly cell to ISA deviation and gust turbulence, then serves the cache', async () => {
+    const nodes = [{ lat: 10.4321, lon: 70.5678 }];
+    let calls = 0;
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => {
-        calls.push(1);
+        calls++;
         return {
           ok: true,
           json: async () => ({
             elevation: 30,
-            current: {
-              temperature_2m: 31,
-              wind_speed_10m: 6,
-              wind_direction_10m: 245,
-              wind_gusts_10m: 9,
+            hourly: {
+              time: ['2026-10-25T11:00', '2026-10-25T12:00', '2026-10-25T13:00'],
+              temperature_2m: [29, 31, 32],
+              wind_speed_10m: [5, 6, 7],
+              wind_direction_10m: [240, 245, 250],
+              wind_gusts_10m: [7, 9, 10],
             },
           }),
         };
       }),
     );
-    const first = await fetchLiveWeather([wp], PRESET);
+    const first = await fetchForecast(nodes, START);
+    expect(calls).toBe(1);
     const cell = first.cells[0];
-    expect(cell?.source.kind).toBe('live');
-    // 31 degC at 30 m elevation, standard 14.8 degC: rounded deviation +16.
-    expect(cell?.isaDevC).toBe(16);
-    expect(cell?.windSpdMs).toBe(6);
-    expect(cell?.turb).toBe('light');
+    expect(cell.source.tag).toBe('LIVE');
+    // 31 degC at 30 m elevation against a standard 14.8 degC: rounded +16.
+    expect(cell.isaDevC).toBe(16);
+    expect(cell.windSpdMs).toBe(6);
+    expect(cell.turb).toBe('light');
     expect(first.notice).toBeNull();
 
-    // Same coordinates, network now dead: the cached cell is reused, no notice.
+    // Same coordinates and forecast hour, network now dead: the cache serves
+    // the cell without a second request and without a fallback notice.
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => {
         throw new Error('offline');
       }),
     );
-    const second = await fetchLiveWeather([wp], PRESET);
-    expect(calls).toHaveLength(1);
-    expect(second.cells[0]?.source.kind).toBe('cache');
+    const second = await fetchForecast(nodes, START);
+    expect(calls).toBe(1);
+    expect(second.cells[0].source.tag).toBe('LIVE');
     expect(second.notice).toBeNull();
     vi.unstubAllGlobals();
   });
 
-  it('falls back to preset values with a notice when the network is down', async () => {
-    const wp: Waypoint = { id: 2, name: 'B', lat: 20.4321, lon: 71.8765, altM: 300, loiterMin: 0 };
+  it('falls back per node with a notice when the network is down', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => {
         throw new Error('offline');
       }),
     );
-    const r = await fetchLiveWeather([wp], PRESET);
+    const r = await fetchForecast([{ lat: 20.4321, lon: 71.8765 }], START);
     vi.unstubAllGlobals();
-    expect(r.cells[0]).not.toBeNull();
-    expect(r.cells[0]?.source.kind).toBe('preset');
-    expect(r.cells[0]?.isaDevC).toBe(7);
-    expect(r.notice).toBe('LIVE WEATHER UNAVAILABLE - USING PRESET VALUES');
+    expect(r.cells[0].source.tag).toBe('FALLBACK');
+    expect(r.cells[0].isaDevC).toBe(0);
+    expect(r.notice).toBe('FORECAST UNAVAILABLE - USING FALLBACK WEATHER');
   });
 
-  it('reports a bad response as a preset fallback per point', async () => {
-    const wp: Waypoint = { id: 3, name: 'C', lat: 21.9876, lon: 69.1234, altM: 300, loiterMin: 0 };
+  it('treats a bad response as a fallback cell', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, json: async () => ({}) })));
-    const r = await fetchLiveWeather([wp], PRESET);
+    const r = await fetchForecast([{ lat: 21.9876, lon: 69.1234 }], START);
     vi.unstubAllGlobals();
-    expect(r.cells[0]?.source.kind).toBe('preset');
-    expect(r.notice).toBe('LIVE WEATHER UNAVAILABLE - USING PRESET VALUES');
+    expect(r.cells[0].source.tag).toBe('FALLBACK');
+    expect(r.notice).toBe('FORECAST UNAVAILABLE - USING FALLBACK WEATHER');
   });
 });
 
 describe('mission plan and profile', () => {
   it('builds takeoff, climb, cruise, loiter, descent and landing segments', () => {
-    const wps = clonePreset('ladakh');
-    const plan = planMission(wps, applyWeatherPreset('standard', wps.length));
+    const wps = templateRoute('ladakh').wps;
+    const plan = planMission(wps, weatherFor(wps.length));
     const kinds = plan.segs.map((s) => s.kind);
     expect(kinds[0]).toBe('takeoff');
     expect(kinds[kinds.length - 1]).toBe('landing');
@@ -221,8 +243,8 @@ describe('mission plan and profile', () => {
   });
 
   it('advances the marker only along cruise legs and keeps it on the route', () => {
-    const wps = clonePreset('rajasthan');
-    const plan = planMission(wps, applyWeatherPreset('headwind', wps.length));
+    const wps = templateRoute('rajasthan').wps;
+    const plan = planMission(wps, weatherFor(wps.length, 0, 15, 250, 'moderate'));
     const track = buildTrack(wps);
     const total = track[track.length - 1].cumM;
     for (const f of [0, 0.25, 0.5, 0.75, 0.99]) {
@@ -287,7 +309,7 @@ describe('monte carlo', () => {
   it('is reproducible for a given seed', () => {
     const req = {
       waypoints: SHORT_ROUTE,
-      weather: applyWeatherPreset('standard', SHORT_ROUTE.length),
+      weather: weatherFor(SHORT_ROUTE.length),
       items: [],
       initState: null,
       runs: 200,
@@ -312,7 +334,7 @@ describe('monte carlo', () => {
   it('jitters weather around the preset without replacing it', () => {
     const req = {
       waypoints: SHORT_ROUTE,
-      weather: applyWeatherPreset('hot-high', SHORT_ROUTE.length),
+      weather: weatherFor(SHORT_ROUTE.length, 12, 8, 215, 'severe'),
       items: [],
       initState: null,
       seed: 11,
@@ -341,12 +363,11 @@ describe('acceptance separation', () => {
     return st;
   };
 
-  it('runs the same engine hot and standard on each preset route', () => {
+  it('runs the same engine hot and standard on each template route', () => {
     for (const id of ['ladakh', 'rajasthan', 'coastal']) {
-      const wps = clonePreset(id);
-      const mk = (wxId: string) => {
-        const wx = applyWeatherPreset(wxId, wps.length);
-        return runMission({
+      const wps = templateRoute(id).wps;
+      const mk = (wx: WaypointWeather[]) =>
+        runMission({
           waypoints: wps,
           items: [],
           weather: wx,
@@ -355,9 +376,8 @@ describe('acceptance separation', () => {
           growthPerH: 0,
           checkLimits: true,
         });
-      };
-      const std = mk('standard');
-      const hot = mk('hot-high');
+      const std = mk(weatherFor(wps.length));
+      const hot = mk(weatherFor(wps.length, 12, 8, 215, 'severe'));
       expect(std.completed).toBe(true);
       expect(hot.maxChtC).toBeGreaterThan(std.maxChtC);
       expect(hot.maxOilTC).toBeGreaterThan(std.maxOilTC);
@@ -365,8 +385,8 @@ describe('acceptance separation', () => {
   });
 
   it('makes a cooling-degraded engine worse than healthy', () => {
-    const wps = clonePreset('rajasthan');
-    const wx = applyWeatherPreset('standard', wps.length);
+    const wps = templateRoute('rajasthan').wps;
+    const wx = weatherFor(wps.length);
     const base = groundState(wps, wx[0].isaDevC);
     const healthy = runMission({
       waypoints: wps,
@@ -397,7 +417,7 @@ describe('acceptance separation', () => {
       { id: 1, name: 'A', lat: 34.1526, lon: 77.5771, altM: 3500, loiterMin: 0 },
       { id: 2, name: 'B', lat: 34.1726, lon: 77.5771, altM: 3500, loiterMin: 0 },
     ];
-    const wx = applyWeatherPreset('hot-high', wps.length);
+    const wx = weatherFor(wps.length, 12, 8, 215, 'severe');
     // The live sim while a cooling fault is being ramped on screen: heads and
     // sump already above the limits. The comparison engine must not start there.
     const hot = groundState(wps, wx[0].isaDevC);
@@ -423,8 +443,8 @@ describe('acceptance separation', () => {
   });
 
   it('burns less than the loaded fuel on a standard day', () => {
-    const wps = clonePreset('coastal');
-    const wx = applyWeatherPreset('standard', wps.length);
+    const wps = templateRoute('coastal').wps;
+    const wx = weatherFor(wps.length);
     const r = runMission({
       waypoints: wps,
       items: [],

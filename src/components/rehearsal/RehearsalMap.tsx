@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type {
-  FilterSpecification,
   GeoJSONSource,
   LayerSpecification,
   Map as MaplibreMap,
@@ -10,16 +9,15 @@ import type {
   StyleSpecification,
 } from 'maplibre-gl';
 import type { FeatureCollection, LineString, Point, Polygon } from 'geojson';
-import { currentPlan, missionClockPosition } from '../../mission/missionStore';
-import { distanceM, presetById, type Waypoint } from '../../mission/route';
+import { currentPlan, missionClockPosition, useMissionStore } from '../../mission/missionStore';
+import { positionAtClock } from '../../mission/mission';
+import { distanceM, type Waypoint } from '../../mission/route';
+import type { Mission } from '../../mission/types';
 import type { WeatherCell } from '../../mission/weather';
+import { circleRing, legMidpoint } from '../../mission/geometry';
+import { MAX_LINK_RANGE_KM } from '../../payload/link';
 import { AIRFIELDS } from '../../data/airfields';
-import {
-  DENIED_LABEL,
-  groundForPreset,
-  zoneForPreset,
-  zoneLabelPoint,
-} from '../../data/zones';
+import { C } from '../../ui/theme';
 import styles from './RehearsalMap.module.css';
 
 const BASEMAP_STYLE_URL = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
@@ -27,81 +25,55 @@ const BASEMAP_STYLE_URL = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style
 const FALLBACK_STYLE: StyleSpecification = {
   version: 8,
   sources: {},
-  layers: [{ id: 'aerotwin-fallback-bg', type: 'background', paint: { 'background-color': '#0B0D10' } }],
+  layers: [{ id: 'aerotwin-fallback-bg', type: 'background', paint: { 'background-color': C.bg } }],
 };
 
 const BASEMAP_TIMEOUT_MS = 6000;
 const FIT_MAX_ZOOM = 10;
 const WORLD_PX = 512;
 const DEG = Math.PI / 180;
-
-const STEEL = '#5B8DB8';
-const RED = '#C4443F';
-const TXT = '#D7DEE7';
-const DIM = '#93A0B0';
-const DATA = '#5E9C9A';
-const BG0 = '#0B0D10';
+const CLICK_TO_VERTEX_MS = 220;
 
 const SRC = {
   route: 'aerotwin-route',
-  denied: 'aerotwin-denied',
+  flown: 'aerotwin-flown',
+  zones: 'aerotwin-zones',
+  draft: 'aerotwin-draft-zone',
+  ring: 'aerotwin-link-ring',
   aircraft: 'aerotwin-aircraft',
+  airports: 'aerotwin-airports',
   dem: 'aerotwin-dem',
 } as const;
 
 const LAYER = {
-  deniedFill: 'aerotwin-denied-fill',
-  deniedLine: 'aerotwin-denied-line',
+  zoneFill: 'aerotwin-zone-fill',
+  zoneLine: 'aerotwin-zone-line',
+  draftFill: 'aerotwin-draft-fill',
+  draftLine: 'aerotwin-draft-line',
+  ringLine: 'aerotwin-ring-line',
   routeCasing: 'aerotwin-route-casing',
   routeLine: 'aerotwin-route-line',
+  flown: 'aerotwin-flown-line',
   chevrons: 'aerotwin-route-chevrons',
   chevronIcon: 'aerotwin-chevron-icon',
+  airportIcon: 'aerotwin-airport-icon',
+  airports: 'aerotwin-airport-symbols',
+  airportsMinor: 'aerotwin-airport-symbols-minor',
   aircraft: 'aerotwin-aircraft-dot',
-  stateLabel: 'aerotwin-state-labels',
-  cityLabel: 'aerotwin-city-labels',
   hillshade: 'aerotwin-hillshade',
   hatch: 'aerotwin-denied-hatch',
 } as const;
 
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] };
 
-// Rough subcontinent extent for the label filter. It is not a boundary: it is
-// a generous box used only to keep state and city labels off neighbouring
-// regions, and it is never drawn.
-const INDIA_LABEL_RING: [number, number][] = [
-  [68.0, 23.5],
-  [70.5, 20.5],
-  [72.5, 17.0],
-  [74.0, 13.0],
-  [77.0, 7.5],
-  [80.5, 9.0],
-  [84.0, 13.0],
-  [86.5, 20.0],
-  [89.5, 22.0],
-  [92.5, 24.0],
-  [97.5, 27.5],
-  [97.5, 29.0],
-  [94.5, 29.5],
-  [91.0, 28.5],
-  [88.0, 28.5],
-  [85.0, 29.5],
-  [82.0, 31.0],
-  [80.0, 33.0],
-  [78.5, 35.8],
-  [74.0, 35.8],
-  [75.5, 32.5],
-  [73.5, 29.5],
-  [71.0, 28.0],
-  [69.5, 27.0],
-  [68.0, 23.5],
-];
-
-const INDIA_WITHIN = [
-  'within',
-  { type: 'Polygon', coordinates: [INDIA_LABEL_RING] },
-] as unknown as FilterSpecification;
-
-const FONT = ['Montserrat SemiBold', 'Open Sans Bold', 'Noto Sans Regular'];
+const AIRPORTS_FC: FeatureCollection<Point> = {
+  type: 'FeatureCollection',
+  features: AIRFIELDS.map((a) => ({
+    type: 'Feature',
+    properties: { type: a.type, icao: a.icao },
+    geometry: { type: 'Point', coordinates: [a.lon, a.lat] },
+  })),
+};
 
 const LABEL_CH_PX = 7.2;
 
@@ -113,12 +85,15 @@ export interface FitPadding {
 }
 
 export interface RehearsalMapProps {
+  mission: Mission;
+  /** Mission nodes resolved to AMSL waypoints. */
   waypoints: Waypoint[];
   weather: WeatherCell[];
-  presetId: string;
   /** Mission clock, s; shows the aircraft marker only when not null. */
   clockS?: number | null;
   showMarker?: boolean;
+  /** Enables click-to-add, node/site/ground dragging, insert handles and zones. */
+  editor?: boolean;
   fitPadding?: FitPadding;
   height?: string;
 }
@@ -135,8 +110,9 @@ interface LabelEntry {
 function hideBaseChrome(map: MaplibreMap): void {
   for (const layer of map.getStyle().layers ?? []) {
     if (layer.id.startsWith('aerotwin')) continue;
-    // Keep only the dark land/water fills and terrain; every base line, label,
-    // place dot and road symbol is removed so the map carries our own chrome.
+    // Keep only the land and water fills; every base line and symbol layer —
+    // including administrative boundaries, roads and place labels — is removed
+    // so the chart carries our own chrome and no national borders.
     if (layer.type === 'background' || layer.type === 'fill' || layer.type === 'raster') continue;
     if (map.getLayoutProperty(layer.id, 'visibility') === 'none') continue;
     map.setLayoutProperty(layer.id, 'visibility', 'none');
@@ -144,7 +120,6 @@ function hideBaseChrome(map: MaplibreMap): void {
 }
 
 function addHillshade(map: MaplibreMap): void {
-  if (!map.getSource('protomaps')) return;
   if (!map.getSource(SRC.dem)) {
     map.addSource(SRC.dem, {
       type: 'raster-dem',
@@ -155,82 +130,20 @@ function addHillshade(map: MaplibreMap): void {
       attribution: 'Terrain © Mapzen / AWS',
     });
   }
-  if (map.getLayer(LAYER.hillshade)) return;
-  map.addLayer({
-    id: LAYER.hillshade,
-    type: 'hillshade',
-    source: SRC.dem,
-    paint: {
-      'hillshade-exaggeration': 0.35,
-      'hillshade-shadow-color': 'rgba(0, 0, 0, 0.55)',
-      'hillshade-highlight-color': 'rgba(76, 88, 102, 0.28)',
-      'hillshade-accent-color': 'rgba(35, 42, 51, 0.35)',
-    },
-  } as LayerSpecification);
-}
-
-function addPlaceLabels(map: MaplibreMap): void {
-  if (!map.getSource('protomaps')) return;
-  // City layer goes in first so the state layer sits above it: a later symbol
-  // layer wins label collisions in MapLibre, and states are the coarser
-  // reference when both are on screen.
-  if (!map.getLayer(LAYER.cityLabel)) {
+  if (!map.getLayer(LAYER.hillshade)) {
     map.addLayer({
-      id: LAYER.cityLabel,
-      type: 'symbol',
-      source: 'protomaps',
-      'source-layer': 'places',
-      minzoom: 5,
-      maxzoom: 12,
-      filter: [
-        'all',
-        ['==', ['get', 'kind'], 'locality'],
-        ['==', ['get', 'kind_detail'], 'city'],
-        ['<=', ['coalesce', ['get', 'min_zoom'], 5], 6],
-        INDIA_WITHIN,
-      ] as unknown as FilterSpecification,
-      layout: {
-        'text-field': ['coalesce', ['get', 'name:en'], ['get', 'name']],
-        'text-font': FONT,
-        'text-size': ['interpolate', ['linear'], ['zoom'], 5, 12, 9, 14],
-        'text-transform': 'uppercase',
-        'text-max-width': 10,
-        'text-padding': 8,
-        'symbol-sort-key': ['coalesce', ['get', 'population_rank'], 0],
-      },
+      id: LAYER.hillshade,
+      type: 'hillshade',
+      source: SRC.dem,
       paint: {
-        'text-color': TXT,
-        'text-halo-color': BG0,
-        'text-halo-width': 1.2,
+        'hillshade-exaggeration': 0.35,
+        'hillshade-shadow-color': 'rgba(0, 0, 0, 0.55)',
+        'hillshade-highlight-color': 'rgba(76, 88, 102, 0.28)',
+        'hillshade-accent-color': 'rgba(35, 42, 51, 0.35)',
       },
     } as LayerSpecification);
   }
-  if (!map.getLayer(LAYER.stateLabel)) {
-    map.addLayer({
-      id: LAYER.stateLabel,
-      type: 'symbol',
-      source: 'protomaps',
-      'source-layer': 'places',
-      minzoom: 5,
-      maxzoom: 12,
-      filter: ['all', ['==', ['get', 'kind'], 'region'], INDIA_WITHIN] as unknown as FilterSpecification,
-      layout: {
-        'text-field': ['coalesce', ['get', 'name:en'], ['get', 'name']],
-        'text-font': FONT,
-        'text-size': ['interpolate', ['linear'], ['zoom'], 5, 11, 8, 13],
-        'text-transform': 'uppercase',
-        'text-letter-spacing': 0.12,
-        'text-max-width': 9,
-        'text-padding': 10,
-        'symbol-sort-key': ['coalesce', ['get', 'population_rank'], 0],
-      },
-      paint: {
-        'text-color': DIM,
-        'text-halo-color': BG0,
-        'text-halo-width': 1.2,
-      },
-    } as LayerSpecification);
-  }
+  if (!map.getTerrain()) map.setTerrain({ source: SRC.dem, exaggeration: 0.5 });
 }
 
 function addDeniedPattern(map: MaplibreMap): void {
@@ -242,7 +155,7 @@ function addDeniedPattern(map: MaplibreMap): void {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   ctx.clearRect(0, 0, size, size);
-  ctx.strokeStyle = RED;
+  ctx.strokeStyle = C.critical;
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(-2, size + 2);
@@ -262,7 +175,7 @@ function addChevronIcon(map: MaplibreMap): void {
   canvas.height = size;
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
-  ctx.strokeStyle = STEEL;
+  ctx.strokeStyle = C.route;
   ctx.lineWidth = 2;
   ctx.lineCap = 'square';
   ctx.beginPath();
@@ -274,32 +187,79 @@ function addChevronIcon(map: MaplibreMap): void {
   map.addImage(LAYER.chevronIcon, img, { pixelRatio: 1 });
 }
 
+/** Aerodrome symbol: blue disc with a paper runway bar. */
+function addAirportIcon(map: MaplibreMap): void {
+  if (map.hasImage(LAYER.airportIcon)) return;
+  const size = 28;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  ctx.fillStyle = C.airport;
+  ctx.beginPath();
+  ctx.arc(size / 2, size / 2, 9.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = C.sheet;
+  ctx.lineWidth = 2.6;
+  ctx.lineCap = 'butt';
+  ctx.beginPath();
+  ctx.moveTo(8.5, 17.5);
+  ctx.lineTo(19.5, 10.5);
+  ctx.stroke();
+  const img = ctx.getImageData(0, 0, size, size);
+  map.addImage(LAYER.airportIcon, img, { pixelRatio: 2 });
+}
+
 const OVERLAY_LAYERS: LayerSpecification[] = [
   {
-    id: LAYER.deniedFill,
+    id: LAYER.zoneFill,
     type: 'fill',
-    source: SRC.denied,
+    source: SRC.zones,
     paint: { 'fill-pattern': LAYER.hatch, 'fill-opacity': 0.18 },
   },
   {
-    id: LAYER.deniedLine,
+    id: LAYER.zoneLine,
     type: 'line',
-    source: SRC.denied,
-    paint: { 'line-color': RED, 'line-width': 1, 'line-opacity': 0.55 },
+    source: SRC.zones,
+    paint: {
+      'line-color': C.critical,
+      'line-width': 1,
+      'line-opacity': 0.55,
+      'line-dasharray': [3, 2],
+    },
+  },
+  {
+    id: LAYER.draftFill,
+    type: 'fill',
+    source: SRC.draft,
+    paint: { 'fill-color': C.critical, 'fill-opacity': 0.1 },
+  },
+  {
+    id: LAYER.draftLine,
+    type: 'line',
+    source: SRC.draft,
+    paint: { 'line-color': C.critical, 'line-width': 1, 'line-dasharray': [3, 2] },
+  },
+  {
+    id: LAYER.ringLine,
+    type: 'line',
+    source: SRC.ring,
+    paint: { 'line-color': C.ink3, 'line-width': 1, 'line-opacity': 0.55, 'line-dasharray': [5, 5] },
   },
   {
     id: LAYER.routeCasing,
     type: 'line',
     source: SRC.route,
     layout: { 'line-cap': 'butt', 'line-join': 'miter' },
-    paint: { 'line-color': BG0, 'line-width': 6, 'line-opacity': 0.92 },
+    paint: { 'line-color': C.bg, 'line-width': 6, 'line-opacity': 0.92 },
   },
   {
     id: LAYER.routeLine,
     type: 'line',
     source: SRC.route,
     layout: { 'line-cap': 'butt', 'line-join': 'miter' },
-    paint: { 'line-color': STEEL, 'line-width': 2, 'line-opacity': 0.95 },
+    paint: { 'line-color': C.route, 'line-width': 2, 'line-opacity': 0.95 },
   },
   {
     id: LAYER.chevrons,
@@ -317,13 +277,43 @@ const OVERLAY_LAYERS: LayerSpecification[] = [
     },
   },
   {
+    id: LAYER.flown,
+    type: 'line',
+    source: SRC.flown,
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': C.activeTrack, 'line-width': 2 },
+  },
+  {
+    id: LAYER.airports,
+    type: 'symbol',
+    source: SRC.airports,
+    filter: [
+      'any',
+      ['==', ['get', 'type'], 'large_airport'],
+      ['==', ['get', 'type'], 'medium_airport'],
+    ],
+    layout: { 'icon-image': LAYER.airportIcon, 'icon-size': 1, 'icon-allow-overlap': false },
+  },
+  {
+    id: LAYER.airportsMinor,
+    type: 'symbol',
+    source: SRC.airports,
+    minzoom: 7.2,
+    filter: [
+      'any',
+      ['==', ['get', 'type'], 'small_airport'],
+      ['==', ['get', 'type'], 'heliport'],
+    ],
+    layout: { 'icon-image': LAYER.airportIcon, 'icon-size': 0.8, 'icon-allow-overlap': false },
+  },
+  {
     id: LAYER.aircraft,
     type: 'circle',
     source: SRC.aircraft,
     paint: {
       'circle-radius': 4.5,
-      'circle-color': DATA,
-      'circle-stroke-color': BG0,
+      'circle-color': C.activeTrack,
+      'circle-stroke-color': C.bg,
       'circle-stroke-width': 2,
     },
   },
@@ -450,27 +440,102 @@ function routeFc(wps: Waypoint[]): FeatureCollection<LineString> {
   };
 }
 
-function deniedFc(presetId: string): FeatureCollection<Polygon> {
-  const zone = zoneForPreset(presetId);
-  if (!zone) return { type: 'FeatureCollection', features: [] };
+function flownFc(
+  wps: Waypoint[],
+  weather: WeatherCell[],
+  clockS: number | null,
+): FeatureCollection<LineString> {
+  if (clockS === null || clockS <= 0 || wps.length < 2) {
+    return { type: 'FeatureCollection', features: [] };
+  }
+  const plan = currentPlan(wps, weather);
+  const end = Math.min(clockS, plan.totalS);
+  if (end <= 0) return { type: 'FeatureCollection', features: [] };
+  const n = Math.min(600, Math.max(2, Math.ceil(end / 10)));
+  const coordinates: [number, number][] = [];
+  for (let i = 0; i <= n; i++) {
+    const p = positionAtClock(plan, wps, (end * i) / n);
+    if (p) coordinates.push([p.lon, p.lat]);
+  }
+  if (coordinates.length < 2) return { type: 'FeatureCollection', features: [] };
   return {
     type: 'FeatureCollection',
     features: [
       {
         type: 'Feature',
         properties: {},
-        geometry: { type: 'Polygon', coordinates: [zone.polygon] },
+        geometry: { type: 'LineString', coordinates },
       },
     ],
   };
 }
 
+function zonesFc(mission: Mission): FeatureCollection<Polygon> {  return {
+    type: 'FeatureCollection',
+    features: mission.zones.map((z) => ({
+      type: 'Feature',
+      properties: { type: z.type, name: z.name },
+      geometry: { type: 'Polygon', coordinates: [z.polygon] },
+    })),
+  };
+}
+
+function draftFc(draft: [number, number][]): FeatureCollection<LineString> {
+  if (draft.length < 2) return { type: 'FeatureCollection', features: [] };
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'LineString', coordinates: draft },
+      },
+    ],
+  };
+}
+
+function ringFc(mission: Mission): FeatureCollection<Polygon> {
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: {},
+        geometry: {
+          type: 'Polygon',
+          coordinates: [circleRing(mission.groundStation.lat, mission.groundStation.lon, MAX_LINK_RANGE_KM * 1000)],
+        },
+      },
+    ],
+  };
+}
+
+function addLabel(
+  map: MaplibreMap,
+  entries: LabelEntry[],
+  lat: number,
+  lon: number,
+  text: string,
+  className: string,
+  dx = 7,
+  align: 'left' | 'right' = 'left',
+): void {
+  const el = document.createElement('div');
+  el.className = `${styles.label} ${className}`;
+  el.textContent = text;
+  const marker = new maplibregl.Marker({ element: el, anchor: align, offset: [dx, 0] })
+    .setLngLat([lon, lat])
+    .addTo(map);
+  entries.push({ marker, el, lat, lon, dx, align });
+}
+
 export default function RehearsalMap({
+  mission,
   waypoints,
   weather,
-  presetId,
   clockS = null,
   showMarker = false,
+  editor = false,
   fitPadding = { top: 48, right: 48, bottom: 48, left: 48 },
   height = '100%',
 }: RehearsalMapProps) {
@@ -478,21 +543,30 @@ export default function RehearsalMap({
   const mapRef = useRef<MaplibreMap | null>(null);
   const readyRef = useRef(false);
   const labelRef = useRef<LabelEntry[]>([]);
-  const lastFitPreset = useRef<string | null>(null);
-  const dataRef = useRef({ waypoints, weather, presetId, clockS, showMarker });
-  dataRef.current = { waypoints, weather, presetId, clockS, showMarker };
+  const lastFitSeq = useRef<number | null>(null);
+  const clickTimer = useRef<number | null>(null);
+  const dataRef = useRef({ mission, waypoints, weather, clockS, showMarker, editor });
+  dataRef.current = { mission, waypoints, weather, clockS, showMarker, editor };
 
   const [mapReady, setMapReady] = useState(false);
-  const [selectedWp, setSelectedWp] = useState<number | null>(null);
+  const selectedNodeId = useMissionStore((s) => s.selectedNodeId);
+  const selectedZoneId = useMissionStore((s) => s.selectedZoneId);
+  const selectedSiteId = useMissionStore((s) => s.selectedSiteId);
+  const mode = useMissionStore((s) => s.mode);
+  const draftZone = useMissionStore((s) => s.draftZone);
+  const flyTarget = useMissionStore((s) => s.flyTarget);
+  const fitSeq = useMissionStore((s) => s.fitSeq);
 
   const pushAll = useCallback(() => {
     const map = mapRef.current;
     if (!map || !readyRef.current) return;
     const d = dataRef.current;
-    const routeSrc = map.getSource(SRC.route) as GeoJSONSource | undefined;
-    routeSrc?.setData(routeFc(d.waypoints));
-    const deniedSrc = map.getSource(SRC.denied) as GeoJSONSource | undefined;
-    deniedSrc?.setData(deniedFc(d.presetId));
+    (map.getSource(SRC.route) as GeoJSONSource | undefined)?.setData(routeFc(d.waypoints));
+    (map.getSource(SRC.zones) as GeoJSONSource | undefined)?.setData(zonesFc(d.mission));
+    (map.getSource(SRC.ring) as GeoJSONSource | undefined)?.setData(ringFc(d.mission));
+    (map.getSource(SRC.flown) as GeoJSONSource | undefined)?.setData(
+      flownFc(d.waypoints, d.weather, d.clockS),
+    );
 
     let cp: { lat: number; lon: number } | null = null;
     if (d.showMarker && d.clockS !== null && d.waypoints.length > 1) {
@@ -526,10 +600,10 @@ export default function RehearsalMap({
       container,
       style: BASEMAP_STYLE_URL,
       attributionControl: false,
-      maxPitch: 0,
-      pitchWithRotate: false,
-      dragRotate: false,
-      touchPitch: false,
+      maxPitch: 60,
+      pitchWithRotate: true,
+      dragRotate: true,
+      touchPitch: true,
       maxZoom: 12,
       minZoom: 3,
       center: [79, 22],
@@ -554,12 +628,15 @@ export default function RehearsalMap({
       if (!map.isStyleLoaded()) return;
       hideBaseChrome(map);
       addHillshade(map);
-      addPlaceLabels(map);
       addDeniedPattern(map);
       addChevronIcon(map);
+      addAirportIcon(map);
       for (const id of Object.values(SRC)) {
         if (id !== SRC.dem && !map.getSource(id)) {
-          map.addSource(id, { type: 'geojson', data: EMPTY });
+          map.addSource(id, {
+            type: 'geojson',
+            data: id === SRC.airports ? AIRPORTS_FC : EMPTY,
+          });
         }
       }
       for (const layer of OVERLAY_LAYERS) {
@@ -585,12 +662,46 @@ export default function RehearsalMap({
       if (map.isStyleLoaded()) ensureOverlays();
     };
     const onMove = () => layoutLabels(map, labelRef.current, dataRef.current.waypoints);
-    const onClick = () => setSelectedWp(null);
+
+    const onMapClick = (e: maplibregl.MapMouseEvent) => {
+      const store = useMissionStore.getState();
+      if (!dataRef.current.editor) {
+        store.selectNode(null);
+        return;
+      }
+      if (store.mode === 'draw-zone') {
+        // Hold the vertex briefly so the second click of a double-click can
+        // finish the polygon instead of adding a duplicate point.
+        if (clickTimer.current !== null) window.clearTimeout(clickTimer.current);
+        clickTimer.current = window.setTimeout(() => {
+          clickTimer.current = null;
+          useMissionStore.getState().addZoneVertex(e.lngLat.lat, e.lngLat.lng);
+        }, CLICK_TO_VERTEX_MS);
+        return;
+      }
+      if (store.mode === 'add-site') {
+        store.addSiteAt(e.lngLat.lat, e.lngLat.lng);
+        return;
+      }
+      store.addNodeAt(e.lngLat.lat, e.lngLat.lng);
+    };
+
+    const onDoubleClick = () => {
+      if (!dataRef.current.editor) return;
+      const store = useMissionStore.getState();
+      if (store.mode !== 'draw-zone') return;
+      if (clickTimer.current !== null) {
+        window.clearTimeout(clickTimer.current);
+        clickTimer.current = null;
+      }
+      store.finishZone();
+    };
 
     map.on('load', onLoad);
     map.on('styledata', onStyleData);
     map.on('move', onMove);
-    map.on('click', onClick);
+    map.on('click', onMapClick);
+    map.on('dblclick', onDoubleClick);
     // Tile and glyph errors are common and do not make the style unusable.
     // The timeout is the fallback path: it only fires when overlays never
     // became ready, which is what an offline style request looks like.
@@ -602,11 +713,13 @@ export default function RehearsalMap({
 
     return () => {
       window.clearTimeout(timer);
+      if (clickTimer.current !== null) window.clearTimeout(clickTimer.current);
       ro.disconnect();
       map.off('load', onLoad);
       map.off('styledata', onStyleData);
       map.off('move', onMove);
-      map.off('click', onClick);
+      map.off('click', onMapClick);
+      map.off('dblclick', onDoubleClick);
       for (const e of labelRef.current) e.marker.remove();
       labelRef.current = [];
       readyRef.current = false;
@@ -615,72 +728,80 @@ export default function RehearsalMap({
     };
   }, [pushAll]);
 
-  // Fit-to-route, both on first paint and whenever a preset is selected.
+  // Fit-to-route on first paint and whenever a whole mission is loaded.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
-    const first = lastFitPreset.current === null;
-    if (!first && lastFitPreset.current === presetId) return;
-    lastFitPreset.current = presetId;
+    const first = lastFitSeq.current === null;
+    if (!first && lastFitSeq.current === fitSeq) return;
+    lastFitSeq.current = fitSeq;
     const el = map.getContainer();
     if (el.clientWidth < 10 || el.clientHeight < 10) return;
     const target = fitRouteCamera(waypoints, el.clientWidth, el.clientHeight, fitPadding);
     if (first) map.jumpTo(target);
     else map.flyTo({ ...target, duration: 900 });
-  }, [mapReady, presetId, waypoints, fitPadding]);
+  }, [mapReady, fitSeq, waypoints, fitPadding]);
 
-  useEffect(() => setSelectedWp(null), [presetId]);
+  // Search result: fly the camera to the chosen place without touching the route.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !flyTarget) return;
+    map.flyTo({ center: [flyTarget.lon, flyTarget.lat], zoom: 10.5, duration: 900 });
+  }, [mapReady, flyTarget]);
 
-  // Route and aircraft data. Clock and route updates are pushed without
-  // rebuilding sources or layers.
+  // Route, zones, link ring and aircraft data.
   useEffect(() => {
     pushAll();
-  });
+  }, [pushAll, mission, waypoints, weather, clockS, showMarker]);
 
-  // Home, destination, alternate, ground-station and denied-area labels.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !readyRef.current) return;
+    (map.getSource(SRC.draft) as GeoJSONSource | undefined)?.setData(draftFc(draftZone));
+  }, [draftZone, mapReady]);
+
+  // Home, destination, zones, sites and the ground station.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
     const entries: LabelEntry[] = [];
-    const add = (
-      lat: number,
-      lon: number,
-      text: string,
-      className: string,
-      dx = 7,
-      align: 'left' | 'right' = 'left',
-    ) => {
-      const el = document.createElement('div');
-      el.className = `${styles.label} ${className}`;
-      el.textContent = text;
-      const marker = new maplibregl.Marker({ element: el, anchor: align, offset: [dx, 0] })
-        .setLngLat([lon, lat])
-        .addTo(map);
-      entries.push({ marker, el, lat, lon, dx, align });
-    };
-
-    const preset = presetById(presetId);
-    const first = waypoints[0];
-    const last = waypoints[waypoints.length - 1];
-    if (preset && first && last) {
+    const first = mission.nodes[0];
+    const last = mission.nodes[mission.nodes.length - 1];
+    if (first && last) {
       const sameEndpoint = distanceM(first.lat, first.lon, last.lat, last.lon) < 500;
       if (sameEndpoint) {
-        add(first.lat, first.lon, 'HOME / DEST', styles.home);
+        addLabel(map, entries, first.lat, first.lon, 'Home', styles.home);
       } else {
-        add(first.lat, first.lon, 'HOME', styles.home);
-        add(last.lat, last.lon, 'DEST', styles.dest);
-      }
-      for (const icao of preset.alternateIcaos) {
-        const af = AIRFIELDS.find((a) => a.icao === icao);
-        if (af) add(af.lat, af.lon, `ALT ${af.icao}`, styles.alt);
+        addLabel(map, entries, first.lat, first.lon, 'Home', styles.home);
+        addLabel(map, entries, last.lat, last.lon, 'Destination', styles.dest);
       }
     }
-    const ground = groundForPreset(presetId);
-    if (ground) add(ground.lat, ground.lon, 'GROUND STATION', styles.ground);
-    const zone = zoneForPreset(presetId);
-    if (zone) {
-      const p = zoneLabelPoint(zone);
-      add(p.lat, p.lon, DENIED_LABEL, styles.denied, -4, 'right');
+    addLabel(
+      map,
+      entries,
+      mission.groundStation.lat,
+      mission.groundStation.lon,
+      'Ground station',
+      styles.ground,
+    );
+    for (const zone of mission.zones) {
+      const ring = zone.polygon.slice(0, -1);
+      if (!ring.length) continue;
+      const lat = ring.reduce((s, p) => s + p[1], 0) / ring.length;
+      const lon = ring.reduce((s, p) => s + p[0], 0) / ring.length;
+      addLabel(
+        map,
+        entries,
+        lat,
+        lon,
+        zone.name,
+        zone.type === 'DENIED' ? styles.denied : styles.restricted,
+        -4,
+        'right',
+      );
+    }
+    for (const site of mission.customSites) {
+      addLabel(map, entries, site.lat, site.lon, site.name, styles.site);
     }
 
     labelRef.current = entries;
@@ -689,44 +810,169 @@ export default function RehearsalMap({
       for (const e of entries) e.marker.remove();
       if (labelRef.current === entries) labelRef.current = [];
     };
-  }, [mapReady, presetId, waypoints]);
+  }, [mapReady, mission, waypoints]);
 
-  // Numbered waypoints; the altitude tag is CSS-only on hover or selection.
+  // Route nodes. Editor mode adds dragging, selection and a hover altitude tag.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
     const markers: MaplibreMarker[] = [];
-    for (let i = 0; i < waypoints.length; i++) {
+    const store = useMissionStore.getState();
+    for (let i = 0; i < mission.nodes.length; i++) {
+      const node = mission.nodes[i];
       const wp = waypoints[i];
       const el = document.createElement('div');
-      el.className = `${styles.wp}${wp.id === selectedWp ? ` ${styles.sel}` : ''}`;
-      el.title = `${wp.name} waypoint`;
+      const selected = editor && node.id === selectedNodeId;
+      el.className = `${styles.wp} ${styles[node.type.toLowerCase()] ?? ''}${selected ? ` ${styles.sel}` : ''}`;
+      el.title = `${node.name} · ${node.type.toLowerCase()} · ${Math.round(wp?.altM ?? node.alt)} m AMSL`;
       const num = document.createElement('span');
+      num.className = styles.wpNum;
       num.textContent = String(i + 1);
       const alt = document.createElement('span');
       alt.className = styles.wpAlt;
-      alt.textContent = `${Math.round(wp.altM)} m AMSL`;
+      alt.textContent = `${node.name} - ${Math.round(wp?.altM ?? node.alt)} m AMSL`;
       el.append(num, alt);
       el.addEventListener('click', (ev) => {
         ev.stopPropagation();
-        setSelectedWp((prev) => (prev === wp.id ? null : wp.id));
+        if (editor) useMissionStore.getState().selectNode(node.id);
       });
-      const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
-        .setLngLat([wp.lon, wp.lat])
+      const marker = new maplibregl.Marker({
+        element: el,
+        anchor: 'center',
+        draggable: editor,
+      })
+        .setLngLat([node.lon, node.lat])
         .addTo(map);
+      if (editor) {
+        marker.on('dragstart', () => {
+          store.selectNode(node.id);
+        });
+        marker.on('dragend', () => {
+          const p = marker.getLngLat();
+          useMissionStore.getState().moveNode(node.id, p.lat, p.lng);
+        });
+      }
       markers.push(marker);
     }
     return () => {
       for (const m of markers) m.remove();
     };
-  }, [mapReady, waypoints, selectedWp]);
+  }, [mapReady, mission.nodes, waypoints, editor, selectedNodeId]);
+
+  // Insert handles sit at each leg midpoint while editing.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !editor) return;
+    const markers: MaplibreMarker[] = [];
+    for (let i = 0; i < waypoints.length - 1; i++) {
+      const mid = legMidpoint(waypoints[i], waypoints[i + 1]);
+      const el = document.createElement('div');
+      el.className = styles.insert;
+      el.title = `Insert a node between ${waypoints[i].name} and ${waypoints[i + 1].name}`;
+      el.textContent = '+';
+      el.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        useMissionStore.getState().insertNodeAfter(i, mid.lat, mid.lon);
+      });
+      markers.push(new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat([mid.lon, mid.lat]).addTo(map));
+    }
+    return () => {
+      for (const m of markers) m.remove();
+    };
+  }, [mapReady, waypoints, editor]);
+
+  // Selected zone vertices, plus a marker for every draft vertex.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !editor) return;
+    const markers: MaplibreMarker[] = [];
+    const selected = mission.zones.find((z) => z.id === selectedZoneId);
+    if (selected) {
+      for (let i = 0; i < selected.polygon.length - 1; i++) {
+        const [lon, lat] = selected.polygon[i];
+        const el = document.createElement('div');
+        el.className = styles.vertex;
+        el.title = 'Drag to move this zone vertex';
+        const marker = new maplibregl.Marker({ element: el, anchor: 'center', draggable: true })
+          .setLngLat([lon, lat])
+          .addTo(map);
+        marker.on('dragend', () => {
+          const p = marker.getLngLat();
+          useMissionStore.getState().moveZoneVertex(selected.id, i, p.lat, p.lng);
+        });
+        markers.push(marker);
+      }
+    }
+    for (let i = 0; i < draftZone.length; i++) {
+      const [lon, lat] = draftZone[i];
+      const el = document.createElement('div');
+      el.className = styles.vertex;
+      el.title = `Vertex ${i + 1}`;
+      markers.push(new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat([lon, lat]).addTo(map));
+    }
+    return () => {
+      for (const m of markers) m.remove();
+    };
+  }, [mapReady, editor, mission.zones, selectedZoneId, draftZone]);
+
+  // Ground station marker and custom site markers.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const markers: MaplibreMarker[] = [];
+    if (editor || showMarker) {
+      const el = document.createElement('div');
+      el.className = styles.groundMarker;
+      el.title = 'Ground station - drag to move';
+      const gs = new maplibregl.Marker({ element: el, anchor: 'center', draggable: editor })
+        .setLngLat([mission.groundStation.lon, mission.groundStation.lat])
+        .addTo(map);
+      if (editor) {
+        gs.on('dragend', () => {
+          const p = gs.getLngLat();
+          useMissionStore.getState().setGround(p.lat, p.lng);
+        });
+      }
+      markers.push(gs);
+    }
+    for (const site of mission.customSites) {
+      const el = document.createElement('div');
+      el.className = `${styles.siteMarker}${editor && site.id === selectedSiteId ? ` ${styles.sel}` : ''}`;
+      el.title = `${site.name} - ${site.type} - ${site.elevM} m${editor ? ' - drag to move' : ''}`;
+      el.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (editor) useMissionStore.getState().selectSite(site.id);
+      });
+      const marker = new maplibregl.Marker({ element: el, anchor: 'center', draggable: editor })
+        .setLngLat([site.lon, site.lat])
+        .addTo(map);
+      if (editor) {
+        marker.on('dragend', () => {
+          const p = marker.getLngLat();
+          useMissionStore.getState().updateSite(site.id, { lat: p.lat, lon: p.lng });
+        });
+      }
+      markers.push(marker);
+    }
+    return () => {
+      for (const m of markers) m.remove();
+    };
+  }, [mapReady, editor, mission.groundStation, mission.customSites, selectedSiteId, showMarker]);
 
   return (
     <div
-      ref={containerRef}
-      className={styles.wrap}
+      className={`${styles.frame}${editor ? ` ${styles.editor}` : ''}`}
       style={{ height }}
-      aria-label="Mission route map"
-    />
+    >
+      <div
+        ref={containerRef}
+        className={`${styles.wrap}${mode === 'draw-zone' ? ` ${styles.crosshair}` : ''}`}
+        aria-label="Mission route map"
+      />
+      <span className={`${styles.tick} ${styles.tickTL}`} aria-hidden="true" />
+      <span className={`${styles.tick} ${styles.tickTR}`} aria-hidden="true" />
+      <span className={`${styles.tick} ${styles.tickBL}`} aria-hidden="true" />
+      <span className={`${styles.tick} ${styles.tickBR}`} aria-hidden="true" />
+    </div>
   );
 }

@@ -21,6 +21,9 @@ import {
   CLIMB_RATE_MS,
   DESCENT_RATE_MS,
   LANDING_S,
+  LONG_MISSION_S,
+  LONG_MISSION_DT,
+  LOITER_BANK_DEG,
   MC_REFRESH_PARAMS_S,
   MISSION_AIRSPEED,
   MISSION_DT,
@@ -34,7 +37,13 @@ import {
   type SegKindName,
 } from './constants';
 import { bearingDeg, legGeometry, windComponents, type Waypoint } from './route';
-import type { WaypointWeather } from './weather';
+import { legWeather, weatherOnLegInto, type WaypointWeather } from './weather';
+import { destinationPoint, orbitRadiusM } from './geometry';
+
+/** Coarser integration keeps an 8 h+ mission tractable; see ASSUMPTIONS.md. */
+export function missionDtFor(totalS: number): number {
+  return totalS > LONG_MISSION_S ? LONG_MISSION_DT : MISSION_DT;
+}
 
 export type SegKind = SegKindName;
 
@@ -125,7 +134,7 @@ export function planMission(wps: Waypoint[], wx: WaypointWeather[]): MissionPlan
   for (let i = 0; i < legsGeo.length; i++) {
     const geo = legsGeo[i];
     const dest = wps[i + 1];
-    const w = wxAt(wx, i + 1);
+    const legWx = legWeather(wx, i);
     if (dest.altM > alt + 1) {
       segs.push({
         kind: 'climb',
@@ -160,8 +169,10 @@ export function planMission(wps: Waypoint[], wx: WaypointWeather[]): MissionPlan
       });
     }
     alt = dest.altM;
-    const tas = MISSION_AIRSPEED.cruise;
-    const { headwindMs } = windComponents(geo.bearingDeg, w.windDirDeg, w.windSpdMs);
+    const tas = dest.speedMs ?? MISSION_AIRSPEED.cruise;
+    // The leg is flown through interpolated weather, so its groundspeed is
+    // planned on the mid-leg wind rather than on the destination's surface value.
+    const { headwindMs } = windComponents(geo.bearingDeg, legWx.windDirDeg, legWx.windSpdMs);
     const gs = Math.max(MIN_GROUNDSPEED_MS, tas - headwindMs);
     const timeS = geo.distM / gs;
     segs.push({
@@ -462,12 +473,19 @@ export function runMission(opts: RunOptions): RunResult {
   let maxVib = 0;
   let breach: Breach | null = null;
   const startFuel = state.fuelKg;
+  // Cruise weather is interpolated along the leg; reuse one object per run.
+  const stepWx: WaypointWeather = {
+    isaDevC: 0,
+    windDirDeg: 0,
+    windSpdMs: 0,
+    gustMs: 0,
+    turb: 'none',
+  };
 
   for (let si = 0; si < segs.length && !breach; si++) {
     const seg = segs[si];
-    const w = wxAt(opts.weather, seg.wxIndex);
+    const segWx = wxAt(opts.weather, seg.wxIndex);
     const pw = MISSION_POWER[seg.kind];
-    const turb = TURB[w.turb];
     const exemptThermal = seg.kind === 'takeoff' || seg.kind === 'landing';
     const checkPower = seg.kind === 'climb' || seg.kind === 'cruise' || seg.kind === 'loiter';
     const steps = Math.max(1, Math.round(seg.durS / dt));
@@ -481,6 +499,11 @@ export function runMission(opts: RunOptions): RunResult {
 
     for (let k = 0; k < steps; k++) {
       const f = k / steps;
+      const w =
+        seg.kind === 'cruise'
+          ? weatherOnLegInto(stepWx, opts.weather, legIdx, f)
+          : segWx;
+      const turb = TURB[w.turb];
       const alt = seg.altStartM + (seg.altEndM - seg.altStartM) * f;
       const a = atmosphere(alt, w.isaDevC);
       if (turb.factor > 0) {
@@ -635,8 +658,9 @@ function checkBreach(
 
 /**
  * Distance flown along the planned route at a mission clock value, used by the
- * live monitor marker. Cruise legs advance along their polyline; climb, loiter
- * and bookend segments hold position (loiter circles in reality).
+ * live monitor marker. Cruise legs advance along their polyline; a loiter flies
+ * a level orbit of radius V^2/(g tan bank) around its hold point; climb and
+ * bookend segments hold position.
  */
 export interface ClockPosition {
   lat: number;
@@ -653,33 +677,49 @@ export function positionAtClock(plan: MissionPlan, wps: Waypoint[], clockS: numb
   if (total <= 0) return null;
   let rem = ((clockS % total) + total) % total;
   let dist = 0;
-  let legIndex = 0;
-  let frac = 0;
-  let kind: SegKind = 'cruise';
   for (const seg of plan.segs) {
     if (rem < seg.durS) {
-      legIndex = Math.max(0, Math.min(seg.legIndex < 0 ? 0 : seg.legIndex, wps.length - 2));
-      frac =
-        seg.kind === 'cruise'
-          ? rem / seg.durS
-          : seg.kind === 'loiter' || seg.kind === 'landing'
-            ? 1
-            : 0;
-      kind = seg.kind;
+      const legIndex = Math.max(0, Math.min(seg.legIndex < 0 ? 0 : seg.legIndex, wps.length - 2));
+      if (seg.kind === 'loiter') {
+        const center = wps[Math.min(seg.legIndex + 1, wps.length - 1)];
+        const radius = orbitRadiusM(seg.tasMs, LOITER_BANK_DEG);
+        const periodS = seg.tasMs > 0 ? (2 * Math.PI * radius) / seg.tasMs : seg.durS;
+        const angle = ((((rem / Math.max(1e-6, periodS)) % 1) + 1) % 1) * 360;
+        const p = destinationPoint(center.lat, center.lon, angle, radius);
+        return {
+          lat: p.lat,
+          lon: p.lon,
+          bearingDeg: (angle + 90) % 360,
+          legIndex,
+          kind: seg.kind,
+          distM: dist,
+        };
+      }
+      const frac =
+        seg.kind === 'cruise' ? rem / seg.durS : seg.kind === 'landing' ? 1 : 0;
       dist += seg.distM * frac;
-      break;
+      const a = wps[legIndex];
+      const b = wps[Math.min(legIndex + 1, wps.length - 1)];
+      return {
+        lat: a.lat + (b.lat - a.lat) * frac,
+        lon: a.lon + (b.lon - a.lon) * frac,
+        bearingDeg: bearingBetween(a, b),
+        legIndex,
+        kind: seg.kind,
+        distM: dist,
+      };
     }
     rem -= seg.durS;
     dist += seg.distM;
   }
-  const a = wps[legIndex];
-  const b = wps[Math.min(legIndex + 1, wps.length - 1)];
+  const last = wps[wps.length - 1];
+  const prev = wps[wps.length - 2];
   return {
-    lat: a.lat + (b.lat - a.lat) * frac,
-    lon: a.lon + (b.lon - a.lon) * frac,
-    bearingDeg: bearingBetween(a, b),
-    legIndex,
-    kind,
+    lat: last.lat,
+    lon: last.lon,
+    bearingDeg: bearingBetween(prev, last),
+    legIndex: wps.length - 2,
+    kind: 'landing',
     distM: dist,
   };
 }
