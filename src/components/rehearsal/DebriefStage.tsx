@@ -5,7 +5,7 @@ import { outcomeHeadline } from '../../rehearsal/metrics';
 import { fmtClock } from '../../rehearsal/clock';
 import { scriptById } from '../../rehearsal/scripts';
 import type { DataGuardDebrief } from '../../payload/types';
-import type { Outcome } from '../../rehearsal/types';
+import type { DirectorInjectionSummary, Outcome } from '../../rehearsal/types';
 
 const OUTCOME_COLOR: Record<Outcome, string> = {
   complete: 'text-steel',
@@ -98,6 +98,55 @@ function DataGuardSection({ data }: { data: DataGuardDebrief }) {
           </span>
         )}
       </div>
+    </section>
+  );
+}
+
+function DirectorSection({ rows }: { rows: DirectorInjectionSummary[] }) {
+  return (
+    <section className="mt-10">
+      <div className="flex items-baseline justify-between gap-4">
+        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
+          Instructor injections
+        </span>
+        <span className="num font-mono text-[12px] text-dim">
+          {rows.length} {rows.length === 1 ? 'event' : 'events'}
+        </span>
+      </div>
+
+      <div className="mt-3 grid grid-cols-[72px_1fr_120px] font-mono text-[10px] uppercase tracking-[0.08em] text-dim">
+        <span>Time</span>
+        <span>Injection</span>
+        <span className="text-right">Detection</span>
+      </div>
+      {rows.map((row, i) => (
+        <div
+          key={`${row.missionS}-${row.label}-${i}`}
+          className="grid grid-cols-[72px_1fr_120px] items-baseline border-t border-edge/60 py-1.5 font-mono text-[12px] leading-5"
+        >
+          <span className="num text-dim">{fmtClock(row.missionS)}</span>
+          <span className="flex min-w-0 items-baseline gap-2 text-txt">
+            <span className="truncate" title={row.label}>
+              {row.label}
+            </span>
+            {row.surprise ? (
+              <span className="shrink-0 border border-amber px-1 font-mono text-[9px] uppercase tracking-[0.08em] text-amber">
+                Surprise
+              </span>
+            ) : null}
+          </span>
+          <span className="num text-right text-dim">
+            {row.scope === 'engine' || row.scope === 'sensor'
+              ? row.detectedS === null
+                ? 'NOT DETECTED'
+                : `+${Math.max(0, Math.round(row.detectedS))} s`
+              : '-'}
+          </span>
+        </div>
+      ))}
+      <p className="mt-2 font-mono text-[10px] leading-4 text-dim">
+        Detection latency is time from injection to the twin announcement, in simulator seconds.
+      </p>
     </section>
   );
 }
@@ -253,6 +302,8 @@ export default function DebriefStage() {
               </span>
             </div>
           </section>
+
+          {debrief.director?.length ? <DirectorSection rows={debrief.director} /> : null}
 
           {debrief.dataGuard ? <DataGuardSection data={debrief.dataGuard} /> : null}
 

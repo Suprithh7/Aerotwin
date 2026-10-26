@@ -12,7 +12,8 @@ export type WorkerCommand =
   | { cmd: 'step' }
   | { cmd: 'inject'; spec: Omit<FaultSpec, 'id' | 'tInject'> }
   | { cmd: 'clear'; id: number }
-  | { cmd: 'fuel'; kg: number };
+  | { cmd: 'fuel'; kg: number }
+  | { cmd: 'env'; patch: { turbulence?: Scenario['turbulence']; isaDev?: number } };
 
 export type WorkerMessage =
   | { type: 'reset' }
@@ -56,6 +57,9 @@ self.onmessage = (e: MessageEvent<WorkerCommand>) => {
       break;
     case 'fuel':
       sim.setFuelKg(m.kg);
+      break;
+    case 'env':
+      sim.setEnvironment(m.patch);
       break;
   }
 };

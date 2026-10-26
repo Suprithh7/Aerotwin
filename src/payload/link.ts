@@ -11,6 +11,8 @@ export const MAX_RATE_MBPS = 2;
 export const MIN_RATE_MBPS = 0.2;
 export const GROUND_ANTENNA_M = 10;
 export const HORIZON_COEFFICIENT = 4.12;
+/** Manual link degradation offered by the instructor station. */
+export const LINK_DEGRADE_FACTOR = 0.25;
 
 /** Smooth-earth radio horizon in km for heights in metres. */
 export function radioHorizonKm(uavAltM: number, gsAltM = GROUND_ANTENNA_M): number {
@@ -23,6 +25,8 @@ export interface LinkInput {
   altM: number;
   gs: GroundStation;
   jammed: boolean;
+  /** Instructor-imposed rate reduction to LINK_DEGRADE_FACTOR of the link. */
+  degraded?: boolean;
 }
 
 /**
@@ -41,10 +45,18 @@ export function linkStatus(input: LinkInput): LinkStatus {
   if (!(rangeKm > 0) || distanceKm > rangeKm) {
     return { state: 'LOST', rateMbps: 0, rangeKm, horizonKm, distanceKm, fraction };
   }
+  const scale = input.degraded ? LINK_DEGRADE_FACTOR : 1;
   if (fraction <= 0.2) {
-    return { state: 'UP', rateMbps: MAX_RATE_MBPS, rangeKm, horizonKm, distanceKm, fraction };
+    return {
+      state: input.degraded ? 'DEGRADED' : 'UP',
+      rateMbps: MAX_RATE_MBPS * scale,
+      rangeKm,
+      horizonKm,
+      distanceKm,
+      fraction,
+    };
   }
   const t = Math.min(1, (fraction - 0.2) / 0.8);
   const rateMbps = Math.max(MIN_RATE_MBPS, MAX_RATE_MBPS - (MAX_RATE_MBPS - MIN_RATE_MBPS) * t);
-  return { state: 'DEGRADED', rateMbps, rangeKm, horizonKm, distanceKm, fraction };
+  return { state: 'DEGRADED', rateMbps: rateMbps * scale, rangeKm, horizonKm, distanceKm, fraction };
 }

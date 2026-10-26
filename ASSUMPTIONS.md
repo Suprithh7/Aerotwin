@@ -760,6 +760,55 @@ the compressed simulation clock.
   channel and the measured-minus-true offset: “Engine healthy, instrument
   fault: CHT Cyl 1 reads N C above the twin.” (`presentation.ts:108-117`).
 
+### Failure Director, detection and failure presentation (October 2026)
+- The director is a separate Zustand store (`director.ts`). At every rehearsal
+  epoch `resetForRehearsal` clears injections, detections and the schedule,
+  seeds the scenario card's fault at `triggerFrac x plannedS`, sets the initial
+  jam for the jammed card, and closes the panel. The manual schedule lives in
+  the same list as the scenario item and is editable and clearable.
+- The scheduler compares schedule times to the **mission clock**, not sim time,
+  so an event due at T+10:00 fires at the same mission time at 1x, 10x and 60x
+  (`dueScheduled`). A scheduled record stores its nominal scheduled time for
+  display and AAR; worker sample quantisation can delay the actual sim
+  injection by up to one tick.
+- **SURPRISE ME** uses `mulberry32(seed)` with a fixed draw order: firing time,
+  engine-vs-instrument, kind, cylinder or channel, severity, ramp. The default
+  window is 5-20 mission minutes, the window end is capped at 98 % of the
+  planned duration, and the item stays hidden in the schedule until it fires.
+  Same seed and window reproduce the same payload and time. This is a
+  reproducibility device, not a cryptographic draw.
+- **Detection latency** is measured in compressed simulator seconds:
+  `announcementSimS - injectionSimS`, stored unrounded for the AAR and rounded
+  only for the ticker. An engine fault is detected at the twin's first
+  non-NOMINAL diagnosis. An instrument fault also counts at the first clear
+  measured-minus-twin separation on the affected channel, using
+  `max(4 x noise sigma, 0.2 x drift range)` for that channel: 3 sigma alone is
+  too coarse for oil pressure and too fine for CHT. Detection is not a
+  wall-clock claim at 10x or 60x.
+- **Sensor-only** is derived from the active records, not the card: an
+  instrument injection with no engine injection holds the HUD at ADVISORY and
+  the guard at MONITOR. A later engine injection puts the run back on the
+  engine path.
+- The **audio** and voice callouts are synthesized in the browser (Web Audio
+  oscillators, `speechSynthesis`); no audio assets are bundled. A chime and
+  callout play once on each state increase, never loop, are muted with **M**,
+  and are unlocked by the first pointer or key gesture. The banner flash is a
+  1 Hz CSS step animation lasting 5 s and disabled under
+  `prefers-reduced-motion`.
+- The **engine-out glide ring** appears only when the HUD state is WARNING or
+  CRITICAL and either no alternate is reachable or the best alternate option is
+  already a glide. Radius = `max(0, aircraft MSL - terrain elevation under the
+  aircraft) x 12`. Its centre is the aircraft shifted toward
+  `wind direction + 180` by `wind speed x radius / phase airspeed`, i.e. the
+  drift accumulated during the glide. It returns no ring at or below terrain.
+  **Terrain masking, obstacles and landing suitability are not modelled**; the
+  ring is a range estimate, not a safe-landing footprint.
+- **DEGRADE x0.25** multiplies the simulated datalink rate by 0.25 in
+  `payload/link.ts`; the guard does not treat it as a jam. Link mode is a single
+  store field shared by the **J** key, the Data Guard button and the director,
+  so those controls cannot disagree. Weather steps post an `env` command to the
+  sim worker and change turbulence/ISA without resetting active faults.
+
 ### Engine life
 The life model is unchanged from M2 and now integrates the rehearsal:
 `weight = max(1, exp((maxCHTtrue − 110 °C) / 15 °C))`, and dose =

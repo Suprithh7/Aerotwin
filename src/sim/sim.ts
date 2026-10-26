@@ -30,6 +30,7 @@ import type {
   Phase,
   Scenario,
   Snapshot,
+  TurbulenceLevel,
 } from './types';
 
 export interface SimOptions {
@@ -142,6 +143,20 @@ export class Sim {
   clearFault(id: number): void {
     this.faults = this.faults.filter((f) => f.id !== id);
     this.stuckFrozen.delete(id);
+  }
+
+  /**
+   * Change ambient conditions mid-run without resetting faults or history. The
+   * true engine and the twin see the same new air, so this is not a residual.
+   */
+  setEnvironment(patch: { turbulence?: TurbulenceLevel; isaDev?: number }): void {
+    this.scenario = {
+      ...this.scenario,
+      ...(patch.turbulence !== undefined ? { turbulence: patch.turbulence } : {}),
+      ...(patch.isaDev !== undefined && Number.isFinite(patch.isaDev)
+        ? { isaDev: patch.isaDev }
+        : {}),
+    };
   }
 
   /**

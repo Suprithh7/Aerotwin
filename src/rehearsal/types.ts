@@ -53,6 +53,15 @@ export interface TimelineTick {
   label: string;
 }
 
+export interface DirectorInjectionSummary {
+  missionS: number;
+  label: string;
+  scope: 'engine' | 'sensor' | 'link' | 'weather';
+  surprise: boolean;
+  /** Sim seconds from injection to the first system announcement. */
+  detectedS: number | null;
+}
+
 export interface DebriefResult {
   outcome: Outcome;
   /** Planned mission clock at the destination, s. */
@@ -66,4 +75,5 @@ export interface DebriefResult {
   sensorOnly: boolean;
   ticks: TimelineTick[];
   dataGuard?: DataGuardDebrief;
+  director?: DirectorInjectionSummary[];
 }

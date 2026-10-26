@@ -9,6 +9,36 @@ import type { ChannelId, Snapshot } from '../sim/types';
 
 export type HudState = 'NOMINAL' | 'ADVISORY' | 'WARNING' | 'CRITICAL';
 
+/** What the presentation layer needs to know about injected faults. */
+export interface HudFlags {
+  sensorOnly: boolean;
+  sensorChannel?: ChannelId;
+  injected: boolean;
+}
+
+const STATE_RANK: Record<HudState, number> = {
+  NOMINAL: 0,
+  ADVISORY: 1,
+  WARNING: 2,
+  CRITICAL: 3,
+};
+
+export function hudRank(state: HudState): number {
+  return STATE_RANK[state];
+}
+
+function flagsFrom(
+  source: ScenarioScript | HudFlags,
+  injected: boolean,
+): HudFlags {
+  if ('injected' in source) return source;
+  return {
+    sensorOnly: source.sensorOnly,
+    ...(source.fault?.channel ? { sensorChannel: source.fault.channel } : {}),
+    injected,
+  };
+}
+
 export interface MeasuredLimit {
   channel: 'CHT' | 'OIL TEMP' | 'OIL PRESSURE';
   value: number;
@@ -88,25 +118,26 @@ function limitSentence(limit: MeasuredLimit): string {
 export function hudStatus(
   snap: Snapshot | null,
   diag: Pick<Diagnosis, 'state' | 'dominant'> | null,
-  script: ScenarioScript,
-  injected: boolean,
+  scriptOrFlags: ScenarioScript | HudFlags,
+  injected = false,
 ): HudStatus {
+  const flags = flagsFrom(scriptOrFlags, injected);
   if (!snap) {
     return {
       state: 'NOMINAL',
       sentence: 'Waiting for the first engine sample.',
       limit: null,
-      sensorOnly: script.sensorOnly,
+      sensorOnly: flags.sensorOnly,
     };
   }
 
   const limit = measuredLimit(snap);
   if (limit) {
-    return { state: 'CRITICAL', sentence: limitSentence(limit), limit, sensorOnly: script.sensorOnly };
+    return { state: 'CRITICAL', sentence: limitSentence(limit), limit, sensorOnly: flags.sensorOnly };
   }
 
-  if (script.sensorOnly && injected) {
-    const channel = script.fault?.channel ?? 'cht1';
+  if (flags.sensorOnly && flags.injected) {
+    const channel = flags.sensorChannel ?? 'cht1';
     const r = snap.readings[channel];
     const delta = Math.abs(r.measured - r.true);
     return {
@@ -136,6 +167,47 @@ export function hudStatus(
     state: 'NOMINAL',
     sentence: `All cylinders within limits; hottest CHT is ${Math.round(hottestCht(snap).value)} C.`,
     limit: null,
-    sensorOnly: script.sensorOnly,
+    sensorOnly: flags.sensorOnly,
   };
+}
+
+const VOICE_KIND: Record<string, string> = {
+  misfire: 'Misfire',
+  injector: 'Injector',
+  cooling: 'Cooling',
+  oil: 'Oil system',
+  ignition: 'Ignition',
+  turbo: 'Turbo',
+  compression: 'Compression',
+  exhaust: 'Exhaust',
+};
+
+const NUMBER_WORD = ['zero', 'one', 'two', 'three', 'four'];
+
+/**
+ * Short spoken callout built from the diagnosis, e.g.
+ * "Caution. Cooling. Cylinder three." Only the words a crew needs.
+ */
+export function voiceCallout(
+  hud: HudStatus,
+  diag: Pick<Diagnosis, 'state' | 'dominant'> | null,
+  flags: HudFlags,
+): string {
+  const prefix = hud.state === 'CRITICAL' ? 'Warning' : 'Caution';
+  const cylinderWord = (n: number) => NUMBER_WORD[n] ?? String(n);
+
+  if (hud.limit?.channel === 'CHT' && hud.limit.cylinder !== undefined) {
+    return `${prefix}. Cylinder ${cylinderWord(hud.limit.cylinder)} CHT.`;
+  }
+  if (flags.sensorOnly && hud.state === 'ADVISORY') {
+    const channel = flags.sensorChannel ?? 'cht1';
+    const label = channelLabel(channel).replace('Cyl ', 'cylinder ');
+    return `${prefix}. Instrument fault. ${label}.`;
+  }
+  const kind = diag?.dominant?.kind;
+  if (kind && VOICE_KIND[kind]) {
+    const cyl = diag.dominant?.cylinder;
+    return `${prefix}. ${VOICE_KIND[kind]}.${cyl && cyl > 0 ? ` Cylinder ${cylinderWord(cyl)}.` : ''}`;
+  }
+  return `${prefix}.`;
 }

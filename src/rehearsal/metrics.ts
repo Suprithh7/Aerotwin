@@ -5,7 +5,13 @@ import type { Factor } from '../mission/monteCarlo';
 import type { WaypointWeather } from '../mission/weather';
 import { CHT_NOMINAL_C } from '../sim/limits';
 import { REHEARSAL_SIM_SPAN_S, fmtClock, fmtMmSs } from './clock';
-import type { DebriefResult, Outcome, RehearsalEvent, TimelineTick } from './types';
+import type {
+  DebriefResult,
+  DirectorInjectionSummary,
+  Outcome,
+  RehearsalEvent,
+  TimelineTick,
+} from './types';
 import type { DataGuardDebrief } from '../payload/types';
 
 /**
@@ -134,6 +140,7 @@ export interface BuildDebriefInput {
   limitLabel: string | null;
   sensorOnly: boolean;
   dataGuard?: DataGuardDebrief;
+  director?: DirectorInjectionSummary[];
 }
 
 function computedLine(input: BuildDebriefInput): string {
@@ -177,5 +184,6 @@ export function buildDebrief(input: BuildDebriefInput): DebriefResult {
     sensorOnly: input.sensorOnly,
     ticks,
     ...(input.dataGuard ? { dataGuard: input.dataGuard } : {}),
+    ...(input.director?.length ? { director: input.director } : {}),
   };
 }

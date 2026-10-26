@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import RehearsalMap from './RehearsalMap';
 import DataGuardHud from './DataGuardHud';
+import DirectorPanel from './DirectorPanel';
 import EngineGauges, { type GaugeReading } from './EngineGauges';
 import { SyntheticChip } from './StageHeader';
 import { useSimStore, type SimStore } from '../../state/store';
 import { currentPlan, missionClockPosition, useMissionStore } from '../../mission/missionStore';
-import { resolveWaypoints } from '../../mission/terrain';
+import { resolveWaypoints, terrainElevation } from '../../mission/terrain';
 import { engineProfileById, type GaugeId } from '../../mission/types';
 import { useAlternates } from '../../nav/useAlternates';
 import type { AlternateRow } from '../../nav/alternates';
@@ -16,12 +17,34 @@ import {
   fmtClock,
   missionClockS,
 } from '../../rehearsal/clock';
-import { hudStatus, measuredLimit, type HudState } from '../../rehearsal/presentation';
+import {
+  hudRank,
+  hudStatus,
+  measuredLimit,
+  voiceCallout,
+  type HudFlags,
+  type HudState,
+} from '../../rehearsal/presentation';
 import { buildDebrief, lifeDoseIncrement } from '../../rehearsal/metrics';
 import { scriptById } from '../../rehearsal/scripts';
 import { PayloadSession } from '../../payload/session';
 import type { PayloadView } from '../../payload/types';
-import type { Outcome } from '../../rehearsal/types';
+import type { DirectorInjectionSummary, Outcome } from '../../rehearsal/types';
+import {
+  activeInjectionContext,
+  detectionDue,
+  dueScheduled,
+  payloadLabel,
+  useDirectorStore,
+  type DirectorPayload,
+  type DirectorSource,
+  type InjectionRecord,
+} from '../../rehearsal/director';
+import { cancelSpeech, playChime, speak, unlockAudio } from '../../rehearsal/audio';
+import { glideRing as buildGlideRing, glideRingVisible } from '../../rehearsal/glide';
+import { wxAt } from '../../mission/mission';
+import { PHASES } from '../../sim/constants';
+import type { TurbulenceLevel } from '../../sim/types';
 
 const LIMIT_HOLD_MS = 2400;
 const TICKER_MS = 8000;
@@ -42,7 +65,6 @@ const VERDICT_MARK: Record<string, string> = {
 interface RunState {
   epoch: number;
   armed: boolean;
-  injected: boolean;
   finishing: boolean;
   done: boolean;
   flagS: number | null;
@@ -57,7 +79,6 @@ function newRun(epoch: number): RunState {
   return {
     epoch,
     armed: false,
-    injected: false,
     finishing: false,
     done: false,
     flagS: null,
@@ -77,6 +98,13 @@ function hottestTrueCht(snap: NonNullable<SimStore['snapshot']>): number {
     snap.readings.cht4.true,
   );
 }
+
+type FireFn = (
+  payload: DirectorPayload,
+  source: DirectorSource,
+  scheduleId: number | null,
+  times?: { missionS?: number; simS?: number },
+) => void;
 
 function Ticker() {
   const events = useRehearsalStore((s) => s.events);
@@ -137,25 +165,124 @@ export default function FlyStage() {
   const simEpoch = useSimStore((s) => s.simEpoch);
   const paused = useSimStore((s) => s.paused);
   const speed = useSimStore((s) => s.speed);
+  const envScenario = useSimStore((s) => s.scenario);
   const togglePause = useSimStore((s) => s.togglePause);
   const setSpeed = useSimStore((s) => s.setSpeed);
 
   const script = useMemo(() => scriptById(scenarioId), [scenarioId]);
   const plan = useMemo(() => currentPlan(waypoints, weather), [waypoints, weather]);
 
+  const directorOpen = useDirectorStore((s) => s.open);
+  const directorInjections = useDirectorStore((s) => s.injections);
+  const linkMode = useDirectorStore((s) => s.linkMode);
+
   const [armed, setArmed] = useState(false);
-  const [injected, setInjected] = useState(false);
   const [payloadView, setPayloadView] = useState<PayloadView | null>(null);
   const [payloadError, setPayloadError] = useState<string | null>(null);
-  const [jammed, setJammed] = useState(false);
   const [follow, setFollow] = useState(false);
+  const [bannerSeq, setBannerSeq] = useState(0);
+  const [attentionSeq, setAttentionSeq] = useState(0);
 
   const ctxRef = useRef({ mission, plan, script, waypoints, weather });
   ctxRef.current = { mission, plan, script, waypoints, weather };
   const runRef = useRef<RunState | null>(null);
   const sessionRef = useRef<PayloadSession | null>(null);
-  const jammedRef = useRef(false);
   const navRowsRef = useRef<AlternateRow[]>([]);
+  const prevRankRef = useRef(0);
+
+  const fireRef = useRef<FireFn>(() => {});
+
+  fireRef.current = (payload, source, scheduleId, times) => {
+    const sim = useSimStore.getState();
+    const total = ctxRef.current.plan.totalS;
+    const simS = times?.simS ?? sim.snapshot?.t ?? 0;
+    const liveMission = missionClockS(Math.min(simS, REHEARSAL_SIM_SPAN_S), total);
+    const missionS = times?.missionS ?? liveMission;
+    const director = useDirectorStore.getState();
+    let scope: InjectionRecord['scope'];
+
+    switch (payload.type) {
+      case 'engine':
+        sim.injectFault({
+          scope: 'engine',
+          kind: payload.kind,
+          severity: payload.severity,
+          rampTime: payload.rampTime,
+          ...(payload.cylinder !== undefined ? { cylinder: payload.cylinder } : {}),
+        });
+        scope = 'engine';
+        break;
+      case 'sensor':
+        sim.injectFault({
+          scope: 'sensor',
+          kind: payload.kind,
+          severity: payload.severity,
+          rampTime: payload.rampTime,
+          channel: payload.channel,
+        });
+        scope = 'sensor';
+        break;
+      case 'link': {
+        const next =
+          payload.action === 'jam'
+            ? 'jammed'
+            : payload.action === 'degrade'
+              ? 'degraded'
+              : 'normal';
+        director.setLinkMode(next);
+        scope = 'link';
+        break;
+      }
+      case 'weather':
+        sim.setEnvironment({
+          ...(payload.turbulence !== undefined ? { turbulence: payload.turbulence } : {}),
+          ...(payload.isaDevC !== undefined ? { isaDev: payload.isaDevC } : {}),
+        });
+        scope = 'weather';
+        break;
+    }
+
+    const surprise = source === 'surprise';
+    const record = director.addInjection({
+      scheduleId,
+      missionS: Math.max(0, missionS),
+      simS,
+      label: payloadLabel(payload),
+      scope,
+      source,
+      surprise,
+      ...(payload.type === 'engine'
+        ? {
+            engineKind: payload.kind,
+            ...(payload.cylinder !== undefined ? { cylinder: payload.cylinder } : {}),
+          }
+        : {}),
+      ...(payload.type === 'sensor'
+        ? { sensorKind: payload.kind, channel: payload.channel }
+        : {}),
+    });
+
+    useRehearsalStore.getState().pushEvent({
+      missionS: record.missionS,
+      label: surprise ? 'SURPRISE' : 'INSTRUCTOR',
+      text: `INSTRUCTOR: ${surprise ? 'SURPRISE - ' : ''}${record.label}.`,
+      tone: payload.type === 'engine' || payload.type === 'sensor' ? 'caution' : 'info',
+      tick: true,
+    });
+  };
+
+  const active = useMemo(
+    () => activeInjectionContext(directorInjections),
+    [directorInjections],
+  );
+  const hudFlags: HudFlags = useMemo(
+    () => ({
+      sensorOnly: active.sensorOnly,
+      ...(active.sensorChannel ? { sensorChannel: active.sensorChannel } : {}),
+      injected: active.injected,
+    }),
+    [active],
+  );
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -164,21 +291,55 @@ export default function FlyStage() {
       const target = event.target as HTMLElement | null;
       if (
         target &&
-        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
       ) {
         return;
       }
       const key = event.key.toLowerCase();
       if (key === 'j') {
-        jammedRef.current = !jammedRef.current;
-        setJammed(jammedRef.current);
+        const current = useDirectorStore.getState().linkMode;
+        fireRef.current(
+          { type: 'link', action: current === 'jammed' ? 'restore' : 'jam' },
+          'manual',
+          null,
+        );
       } else if (key === 'c') {
         setFollow((v) => !v);
+      } else if (key === 'f') {
+        useDirectorStore.getState().toggleOpen();
+      } else if (key === 'm') {
+        const director = useDirectorStore.getState();
+        if (director.soundOn) cancelSpeech();
+        director.toggleSound();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  // Browsers only allow audio after a gesture; arm both chimes and voice on the
+  // first pointer or key event, wherever it lands.
+  useEffect(() => {
+    const unlock = () => unlockAudio();
+    window.addEventListener('pointerdown', unlock, { once: true, capture: true });
+    window.addEventListener('keydown', unlock, { once: true, capture: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlock, true);
+      window.removeEventListener('keydown', unlock, true);
+      cancelSpeech();
+    };
+  }, []);
+
+  // A new run starts from a clean banner and rank history.
+  useEffect(() => {
+    prevRankRef.current = 0;
+    setBannerSeq(0);
+    setAttentionSeq(0);
+    cancelSpeech();
+  }, [epochTarget]);
 
   // Ground truth can finish after a pause or while the player is idle; a slow
   // refresh keeps the adversary verdict and link readout current.
@@ -197,11 +358,19 @@ export default function FlyStage() {
     const run = runRef.current;
 
     let cancelled = false;
+    setArmed(false);
     setPayloadView(null);
     setPayloadError(null);
-    const scriptJam = Boolean(ctxRef.current.script.jam);
-    jammedRef.current = scriptJam;
-    setJammed(scriptJam);
+
+    const director = useDirectorStore.getState();
+    director.resetForRehearsal(ctxRef.current.script, ctxRef.current.plan.totalS);
+    director.setOpen(false);
+    if (ctxRef.current.script.jam) {
+      fireRef.current({ type: 'link', action: 'jam' }, 'scenario', null, {
+        missionS: 0,
+        simS: 0,
+      });
+    }
 
     void PayloadSession.create({
       mission: ctxRef.current.mission,
@@ -243,6 +412,16 @@ export default function FlyStage() {
           ? ctx.plan.cruiseDistM
           : (missionClockPosition(ctx.waypoints, ctx.weather, missionS)?.distM ?? 0);
       const dataGuard = sessionRef.current?.getDebrief();
+      const directorState = useDirectorStore.getState();
+      const activeAtFinish = activeInjectionContext(directorState.injections);
+      const directorSummary: DirectorInjectionSummary[] = directorState.injections.map((r) => ({
+        missionS: r.missionS,
+        label: r.label,
+        scope: r.scope,
+        surprise: r.surprise,
+        detectedS:
+          directorState.detections.find((d) => d.injectionId === r.id)?.latencyS ?? null,
+      }));
       const debrief = buildDebrief({
         outcome,
         plannedS: ctx.plan.totalS,
@@ -254,8 +433,9 @@ export default function FlyStage() {
         flagS: run.flagS,
         limitS: run.limitS,
         limitLabel: run.limitLabel,
-        sensorOnly: ctx.script.sensorOnly,
+        sensorOnly: activeAtFinish.sensorOnly,
         ...(dataGuard ? { dataGuard } : {}),
+        ...(directorSummary.length ? { director: directorSummary } : {}),
       });
       useRehearsalStore.getState().finish(debrief);
     };
@@ -284,30 +464,44 @@ export default function FlyStage() {
       }
       run.lastT = t;
 
-      const sc = ctx.script;
-      const trigger = sc.triggerFrac === null ? Infinity : sc.triggerFrac * total;
-      if (!run.injected && sc.fault && mission >= trigger) {
-        const f = sc.fault;
-        state.injectFault({
-          scope: f.scope,
-          kind: f.kind,
-          severity: f.severity,
-          rampTime: f.rampTime,
-          ...(f.cylinder !== undefined ? { cylinder: f.cylinder } : {}),
-          ...(f.channel !== undefined ? { channel: f.channel } : {}),
+      // Mission-clock scheduler: the same due time applies at 1x, 10x and 60x.
+      const scheduled = useDirectorStore.getState();
+      for (const item of dueScheduled(scheduled.schedule, mission)) {
+        scheduled.markFired(item.id);
+        fireRef.current(item.payload, item.source, item.id, {
+          missionS: item.atS,
+          simS: t,
         });
-        run.injected = true;
-        setInjected(true);
+      }
+
+      const after = useDirectorStore.getState();
+      const activeNow = activeInjectionContext(after.injections);
+      const hudNow = hudStatus(sn, state.diagnosis, {
+        sensorOnly: activeNow.sensorOnly,
+        ...(activeNow.sensorChannel ? { sensorChannel: activeNow.sensorChannel } : {}),
+        injected: activeNow.injected,
+      });
+
+      // Detection latency: first twin announcement, or for an instrument fault
+      // the first clear separation of the affected channel from the twin.
+      for (const injection of after.injections) {
+        if (injection.scope !== 'engine' && injection.scope !== 'sensor') continue;
+        if (after.detections.some((d) => d.injectionId === injection.id)) continue;
+        if (t < injection.simS + 0.2) continue;
+        if (!detectionDue(injection, state.diagnosis.state, sn.readings)) continue;
+        const detection = after.addDetection({
+          injectionId: injection.id,
+          missionS: mission,
+          simS: t,
+        });
+        if (!detection) continue;
+        if (injection.scope === 'engine' && run.flagS === null) run.flagS = mission;
+        const seconds = Math.max(0, Math.round(detection.latencyS));
         useRehearsalStore.getState().pushEvent({
           missionS: mission,
-          label: 'FAULT INJECTED',
-          text:
-            sc.id.startsWith('cooling')
-              ? `Cylinder ${f.cylinder ?? 3} cooling degraded.`
-              : sc.id === 'sensor'
-                ? 'CHT 1 sensor drifting high; engine healthy.'
-                : 'Fault injected.',
-          tone: 'caution',
+          label: 'DETECTED',
+          text: `Detected ${seconds} s after injection. ${hudNow.sentence}`,
+          tone: hudNow.state === 'CRITICAL' ? 'alert' : 'caution',
           tick: true,
         });
       }
@@ -317,10 +511,11 @@ export default function FlyStage() {
         session.tick({
           missionS: mission,
           diagnosis: state.diagnosis,
-          sensorOnly: sc.sensorOnly,
+          sensorOnly: activeNow.sensorOnly,
           snapshot: sn,
           alternates: navRowsRef.current,
-          jammed: jammedRef.current,
+          jammed: after.linkMode === 'jammed',
+          linkDegraded: after.linkMode === 'degraded',
           forcedLanding: false,
         });
         setPayloadView(session.getView());
@@ -334,24 +529,13 @@ export default function FlyStage() {
         useRehearsalStore.getState().pushEvent({
           missionS: mission,
           label: limit.channel,
-          text: hudStatus(sn, state.diagnosis, sc, run.injected).sentence,
+          text: hudNow.sentence,
           tone: 'alert',
           tick: true,
         });
         if (!state.paused) state.togglePause();
         run.hold = window.setTimeout(() => finish('aborted', mission), LIMIT_HOLD_MS);
         return;
-      }
-
-      if (run.injected && !sc.sensorOnly && run.flagS === null && state.diagnosis.state !== 'NOMINAL') {
-        run.flagS = mission;
-        useRehearsalStore.getState().pushEvent({
-          missionS: mission,
-          label: 'TWIN FLAG',
-          text: hudStatus(sn, state.diagnosis, sc, run.injected).sentence,
-          tone: 'caution',
-          tick: true,
-        });
       }
 
       if (t >= REHEARSAL_SIM_SPAN_S) {
@@ -396,7 +580,24 @@ export default function FlyStage() {
   const nearestLabel = nearest ? airfieldLabel(nearest.airfield) : null;
   navRowsRef.current = nav.rows;
 
-  const hud = hudStatus(shownSnap, diagnosis, script, injected);
+  const hud = hudStatus(shownSnap, diagnosis, hudFlags);
+
+  const latestHudRef = useRef({ hud, diagnosis, flags: hudFlags });
+  latestHudRef.current = { hud, diagnosis, flags: hudFlags };
+
+  useEffect(() => {
+    const rank = hudRank(hud.state);
+    const previous = prevRankRef.current;
+    prevRankRef.current = rank;
+    if (rank <= previous) return;
+    setBannerSeq((n) => n + 1);
+    setAttentionSeq((n) => n + 1);
+    if (!useDirectorStore.getState().soundOn) return;
+    const latest = latestHudRef.current;
+    playChime(rank >= 3 ? 'warning' : 'caution');
+    speak(voiceCallout(latest.hud, latest.diagnosis, latest.flags));
+  }, [hud.state]);
+
   const markerTone =
     hud.state === 'CRITICAL' ? 'critical' : hud.state === 'NOMINAL' ? 'nominal' : 'caution';
   const r = shownSnap?.readings;
@@ -417,6 +618,46 @@ export default function FlyStage() {
     fuel: { value: r?.fuel.measured ?? null, expected: r?.fuel.twin ?? null },
   };
 
+  const affectedCylinders = useMemo(() => {
+    const set = new Set(active.affectedCylinders);
+    if (hud.state !== 'NOMINAL' && diagnosis.dominant?.cylinder) {
+      set.add(diagnosis.dominant.cylinder);
+    }
+    return [...set];
+  }, [active, hud.state, diagnosis]);
+
+  const glide = useMemo(() => {
+    if (!ready || !shownSnap || !pos) return null;
+    const glideMode = nav.rows.length > 0 && nav.rows[0].mode === 'GLIDE';
+    if (!glideRingVisible(hud.state, nav.reachable !== null, glideMode)) return null;
+    const w = wxAt(weather, pos.legIndex + 1);
+    return buildGlideRing(
+      pos.lat,
+      pos.lon,
+      shownSnap.scenario.altitude,
+      terrainElevation(pos.lat, pos.lon),
+      w.windDirDeg,
+      w.windSpdMs,
+      PHASES[shownSnap.phase].airspeedMs,
+    );
+  }, [ready, shownSnap, pos, hud.state, nav.reachable, nav.rows, weather]);
+
+  const handleInject = (payload: DirectorPayload) => {
+    fireRef.current(payload, 'manual', null);
+  };
+  const handleSchedule = (payload: DirectorPayload, atS: number) => {
+    useDirectorStore.getState().addSchedule(payload, atS, 'manual');
+  };
+  const handleLink = (action: 'jam' | 'restore' | 'degrade') => {
+    fireRef.current({ type: 'link', action }, 'manual', null);
+  };
+  const handleWeather = (patch: { turbulence?: TurbulenceLevel; isaDevC?: number }) => {
+    fireRef.current({ type: 'weather', ...patch }, 'manual', null);
+  };
+  const handleSurprise = () => {
+    useDirectorStore.getState().surprise(plan.totalS);
+  };
+
   return (
     <div className="relative h-full w-full overflow-hidden bg-paper font-sans text-ink">
       <div className="absolute inset-0">
@@ -427,6 +668,8 @@ export default function FlyStage() {
           clockS={ready ? missionS : null}
           showMarker
           markerTone={markerTone}
+          glide={glide}
+          attentionSeq={attentionSeq}
           follow={follow}
           height="100%"
           fitPadding={{ top: 120, right: 380, bottom: 220, left: 120 }}
@@ -434,8 +677,24 @@ export default function FlyStage() {
       </div>
 
       <div className="pointer-events-none absolute inset-0 z-[4]">
+        <div
+          className="absolute left-0 right-0 top-0 h-1"
+          style={{ backgroundColor: STATE_COLOR[hud.state] }}
+          aria-hidden="true"
+        />
+
         <div className="absolute left-4 top-4 max-w-[420px]">
-          <div className="hud-panel px-3 py-2">
+          <div
+            key={`banner-${epochTarget}-${bannerSeq}`}
+            className={`hud-panel px-3 py-2 ${
+              bannerSeq > 0
+                ? `state-banner-flash${hud.state === 'CRITICAL' ? ' state-banner-critical' : ''}`
+                : ''
+            }`}
+            style={{ borderLeft: `3px solid ${STATE_COLOR[hud.state]}` }}
+            role="status"
+            aria-live="polite"
+          >
             <div
               className="font-mono text-[28px] uppercase leading-[32px] tracking-[0.04em]"
               style={{ color: STATE_COLOR[hud.state] }}
@@ -483,6 +742,14 @@ export default function FlyStage() {
             >
               {follow ? 'CAM FOLLOW [C]' : 'CAM FREE [C]'}
             </button>
+            <button
+              className={`h-7 px-2 font-mono text-[11px] ${directorOpen ? 'active' : ''}`}
+              onClick={() => useDirectorStore.getState().toggleOpen()}
+              aria-pressed={directorOpen}
+              title="Failure director (F)"
+            >
+              DIRECTOR [F]
+            </button>
           </div>
         </div>
 
@@ -491,6 +758,8 @@ export default function FlyStage() {
             gauges={profile.gauges}
             readings={gaugeReadings}
             cylinderCht={chts.map((v) => v ?? null)}
+            affectedGauges={active.affectedGauges}
+            affectedCylinders={affectedCylinders}
           />
         </div>
 
@@ -528,6 +797,14 @@ export default function FlyStage() {
             ) : (
               <div className="mt-1 font-mono text-[11px] text-ink-3">Assessing</div>
             )}
+            {glide ? (
+              <div className="mt-1 flex items-baseline justify-between gap-2 border-t border-rule pt-1 font-mono text-[10px] text-ink-3">
+                <span>ENGINE-OUT GLIDE</span>
+                <span className="num text-critical">
+                  {(glide.radiusM / 1000).toFixed(1)} km
+                </span>
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -536,10 +813,10 @@ export default function FlyStage() {
             view={payloadView}
             groundName="Mission ground station"
             error={payloadError}
-            jammed={jammed}
+            jammed={linkMode === 'jammed'}
             onToggleJam={() => {
-              jammedRef.current = !jammedRef.current;
-              setJammed(jammedRef.current);
+              const current = useDirectorStore.getState().linkMode;
+              handleLink(current === 'jammed' ? 'restore' : 'jam');
             }}
             onRemoteZeroize={() => sessionRef.current?.requestRemoteZeroize()}
             onRevealAdversary={() => {
@@ -553,6 +830,21 @@ export default function FlyStage() {
           <Ticker />
         </div>
       </div>
+
+      {directorOpen ? (
+        <DirectorPanel
+          missionS={missionS}
+          linkMode={linkMode}
+          turbulence={envScenario.turbulence}
+          isaDevC={envScenario.isaDev}
+          onClose={() => useDirectorStore.getState().setOpen(false)}
+          onInject={handleInject}
+          onSchedule={handleSchedule}
+          onLink={handleLink}
+          onWeather={handleWeather}
+          onSurprise={handleSurprise}
+        />
+      ) : null}
     </div>
   );
 }

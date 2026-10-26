@@ -31,12 +31,27 @@ function frac(spec: GaugeSpec, value: number): number {
   return Math.max(0, Math.min(1, (value - spec.min) / Math.max(1e-6, spec.max - spec.min)));
 }
 
-function Gauge({ spec, reading }: { spec: GaugeSpec; reading: GaugeReading }) {
-  const angle = reading.value === null ? null : START_DEG + frac(spec, reading.value) * SWEEP_DEG;
+function Gauge({
+  spec,
+  reading,
+  affected = false,
+}: {
+  spec: GaugeSpec;
+  reading: GaugeReading;
+  affected?: boolean;
+}) {
+  const valueFrac = reading.value === null ? null : frac(spec, reading.value);
+  const expectedFrac = reading.expected === null ? null : frac(spec, reading.expected);
+  const angle = valueFrac === null ? null : START_DEG + valueFrac * SWEEP_DEG;
   const notch =
-    reading.expected === null ? null : START_DEG + frac(spec, reading.expected) * SWEEP_DEG;
+    expectedFrac === null ? null : START_DEG + expectedFrac * SWEEP_DEG;
   const valueText =
     reading.value === null ? '--' : reading.value.toFixed(spec.decimals);
+  const showDeviation =
+    affected &&
+    valueFrac !== null &&
+    expectedFrac !== null &&
+    Math.abs(valueFrac - expectedFrac) > 0.005;
 
   return (
     <div className="flex w-[88px] shrink-0 flex-col items-center">
@@ -69,6 +84,24 @@ function Gauge({ spec, reading }: { spec: GaugeSpec; reading: GaugeReading }) {
             />
           );
         })}
+        {showDeviation && valueFrac !== null && expectedFrac !== null && (
+          <>
+            <path
+              d={arcPath(Math.min(valueFrac, expectedFrac) * 100, Math.max(valueFrac, expectedFrac) * 100, 29)}
+              fill="none"
+              stroke="var(--caution)"
+              strokeWidth="2.4"
+              strokeDasharray="2 2"
+            />
+            <path
+              d={arcPath(Math.min(valueFrac, expectedFrac) * 100, Math.max(valueFrac, expectedFrac) * 100, 33)}
+              fill="none"
+              stroke="var(--caution)"
+              strokeWidth="2.4"
+              strokeDasharray="2 2"
+            />
+          </>
+        )}
         {notch !== null && (
           <line
             x1={polar(50, 50, 40, notch)[0]}
@@ -103,10 +136,16 @@ export default function EngineGauges({
   gauges,
   readings,
   cylinderCht,
+  affectedGauges = [],
+  affectedCylinders = [],
 }: {
   gauges: Record<GaugeId, GaugeSpec>;
   readings: Record<GaugeId, GaugeReading>;
   cylinderCht: (number | null)[];
+  /** Gauges whose measured value has separated from the twin. */
+  affectedGauges?: GaugeId[];
+  /** 1-based cylinders with an active fault. */
+  affectedCylinders?: number[];
 }) {
   const order: GaugeId[] = ['rpm', 'cht', 'oilP', 'oilT', 'fuel'];
 
@@ -119,7 +158,12 @@ export default function EngineGauges({
       <div className="flex items-stretch gap-3">
         <div className="flex gap-2">
           {order.map((id) => (
-            <Gauge key={id} spec={gauges[id]} reading={readings[id]} />
+            <Gauge
+              key={id}
+              spec={gauges[id]}
+              reading={readings[id]}
+              affected={affectedGauges.includes(id)}
+            />
           ))}
         </div>
         <div className="flex flex-col justify-center border-l border-rule pl-3">
@@ -135,6 +179,9 @@ export default function EngineGauges({
                       v === null
                         ? 'var(--rule)'
                         : thermalColor(v, CHT_NOMINAL_C, CHT_CAUTION_C, CHT_LIMIT_C),
+                    ...(affectedCylinders.includes(i + 1)
+                      ? { outline: '1px solid var(--caution)', outlineOffset: 1 }
+                      : {}),
                   }}
                 />
                 <span className="num font-mono text-[11px] leading-[14px] text-ink">

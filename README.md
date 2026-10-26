@@ -29,7 +29,7 @@ every run is reproducible from its seed.
 npm install
 npm run dev        # rehearsal at http://localhost:5173
 npm run build      # tsc + vite build
-npx vitest run     # 187 tests
+npx vitest run     # 217 tests
 ```
 
 ## Stages
@@ -46,15 +46,55 @@ npx vitest run     # 187 tests
 - **FLY** - full-bleed map with six overlay groups: engine state and one plain
   sentence, mission clock and speed, cylinder strip with oil-pressure/CHT/boost
   bars, nearest landing with reachability, the DATA panel with the collapsible
-  ground station, and an 8-second event ticker.
+  ground station, and an 8-second event ticker. A collapsible **Failure
+  Director** panel (**F**) gives the instructor engine faults, instrument
+  faults, link jam/degrade, weather steps, scheduled events and a seeded
+  surprise. Warning and critical states drive a flashing banner, a chime and
+  spoken callout, a state-coloured aircraft ring, gauge deviation hatching, and
+  the engine-out glide ring when no alternate is reachable.
 - **DEBRIEF** - outcome, flight time, distance, engine life used, an event
-  timeline, the computed twin-flag line, and the Data Guard result by priority
-  with the erase and recovery outcome. REPLAY or NEW MISSION.
+  timeline, the computed twin-flag line, every instructor injection with its
+  detection latency, and the Data Guard result by priority with the erase and
+  recovery outcome. REPLAY or NEW MISSION.
 
 Press **E** on any stage for the engineering overlay: ENGINEER (strip charts,
 boxer schematic, diagnosis, fault injection) and VALIDATION (route map with
 per-leg Monte Carlo breach colours, weather, mission panel). **Esc** closes it
 without resetting the run.
+
+## Failure Director
+
+The instructor station is a side panel on FLY, closed by default (**F**). It
+injects the eight engine faults with a severity, ramp and cylinder where the
+fault is cylinder-specific; instrument drift, stuck and spike faults on any
+telemetered channel; datalink **JAM**, **DEGRADE x0.25** and **RESTORE**;
+turbulence and ISA-deviation steps. Every action can fire immediately or be
+scheduled at a T+mm:ss, and the schedule is editable and clearable. A scenario
+card's script loads into the same schedule at its trigger fraction.
+
+**SURPRISE ME** draws a seeded engine or instrument fault and a firing time in
+the chosen window (default 5-20 min), keeps the pick hidden in the schedule
+list, and reveals it in the ticker only when it fires. The same seed and window
+reproduce the same fault and time. The scheduler compares against the mission
+clock, so a scheduled event is due at the same mission time at 1x, 10x and 60x
+(worker ticks quantize the actual injection by up to one sample).
+
+Each injection is logged with its mission time. An engine fault is detected at
+the twin's first non-NOMINAL diagnosis; an instrument fault is also detected at
+the first clear separation between the affected measured channel and the twin.
+The ticker prints `Detected N s after injection.` and the AAR lists the same
+latency per event. Detection latency is in compressed simulator seconds, not
+wall time.
+
+Presentation is deliberately restrained: a 4 px top bar and aircraft ring take
+the state colour; on a state increase the banner flashes at 1 Hz for 5 s and
+then holds, respecting `prefers-reduced-motion`; two synthesized chimes and a
+short `speechSynthesis` callout distinguish caution from warning, one shot per
+state increase, muted with **M** and unlocked by the first pointer or key
+event. The affected gauge shows a hatched arc between measured and twin values
+and the affected cylinder block gets a 1 px outline. When the state is WARNING
+or CRITICAL and no alternate is reachable (or the best option is a glide), the
+map draws the engine-out glide ring described below.
 
 ## Data Guard
 
@@ -104,7 +144,7 @@ device. The DATA panel footer repeats this.
 | `src/mission/` | Mission model and editor store, route geometry, terrain/AGL, weather, GeoJSON, pre-flight checks, profile planner, Monte Carlo |
 | `src/nav/` | alternate-airfield reachability, units, live layer |
 | `src/payload/` | recon points from RECON nodes, dummy payloads, WebCrypto session, datalink, priority offload, Data Guard, session |
-| `src/rehearsal/` | stage store, clock compression, scenario scripts, HUD presentation, debrief metrics |
+| `src/rehearsal/` | stage store, clock compression, scenario scripts, HUD presentation, failure director, audio, glide ring, debrief metrics |
 | `src/data/` | 583 bundled Indian airfields, five mission templates, reference places |
 | `src/components/rehearsal/` | BRIEF, FLY, DEBRIEF, Data Guard HUD, the stage map and the E overlay |
 | `src/components/` | the original engineering console, reused inside the overlay |
@@ -120,10 +160,13 @@ large ridges — the Ladakh template carries two extra passes (STOK PASS and
 INDUS PASS) to clear DEM ridges found during acceptance — but it is not an
 obstacle survey: towers, wires, buildings and DEM error are not modelled, and
 the 100 m minimum applies only outside a 1 km buffer at each route end.
-Glide range is still a still-air, obstacle-free figure:
+Glide range is still an obstacle-free figure:
 `altitude above the field x an assumed L/D of 12`, so a "reachable" alternate on
-the HUD can be behind a ridge. Treat every glide number as an upper bound on
-range, never as clearance.
+the HUD can be behind a ridge. The FLY glide ring uses height above the
+sampled terrain under the aircraft times the same ratio, and shifts its centre
+downwind by `wind speed x glide time`; **terrain masking is not modelled**, so
+the ring can cover ground the aircraft could not actually glide to. Treat every
+glide number as an upper bound on range, never as clearance.
 
 Related consequences, all of which the interface states or should be read with:
 

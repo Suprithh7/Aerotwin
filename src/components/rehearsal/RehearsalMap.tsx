@@ -18,6 +18,7 @@ import { circleRing, legMidpoint } from '../../mission/geometry';
 import { MAX_LINK_RANGE_KM } from '../../payload/link';
 import { AIRFIELDS } from '../../data/airfields';
 import { REHEARSAL_SIM_SPAN_S } from '../../rehearsal/clock';
+import type { GlideRing } from '../../rehearsal/glide';
 import { C } from '../../ui/theme';
 import styles from './RehearsalMap.module.css';
 
@@ -55,6 +56,7 @@ const SRC = {
   zones: 'aerotwin-zones',
   draft: 'aerotwin-draft-zone',
   ring: 'aerotwin-link-ring',
+  glide: 'aerotwin-glide-ring',
   airports: 'aerotwin-airports',
   dem: 'aerotwin-dem',
 } as const;
@@ -65,6 +67,7 @@ const LAYER = {
   draftFill: 'aerotwin-draft-fill',
   draftLine: 'aerotwin-draft-line',
   ringLine: 'aerotwin-ring-line',
+  glideLine: 'aerotwin-glide-line',
   routeCasing: 'aerotwin-route-casing',
   routeLine: 'aerotwin-route-line',
   flown: 'aerotwin-flown-line',
@@ -107,6 +110,10 @@ export interface RehearsalMapProps {
   showMarker?: boolean;
   /** State colour of the aircraft marker ring. */
   markerTone?: MarkerTone;
+  /** Engine-out glide range, drawn as a dashed ring when present. */
+  glide?: GlideRing | null;
+  /** Bumped once on a HUD state increase to ease the camera to the aircraft. */
+  attentionSeq?: number;
   /** Centres the camera on the aircraft whenever it moves. */
   follow?: boolean;
   /** Enables click-to-add, node/site/ground dragging, insert handles and zones. */
@@ -263,6 +270,17 @@ const OVERLAY_LAYERS: LayerSpecification[] = [
     type: 'line',
     source: SRC.ring,
     paint: { 'line-color': C.ink3, 'line-width': 1, 'line-opacity': 0.55, 'line-dasharray': [5, 5] },
+  },
+  {
+    id: LAYER.glideLine,
+    type: 'line',
+    source: SRC.glide,
+    paint: {
+      'line-color': C.critical,
+      'line-width': 1.5,
+      'line-opacity': 0.85,
+      'line-dasharray': [4, 3],
+    },
   },
   {
     id: LAYER.routeCasing,
@@ -533,6 +551,23 @@ function ringFc(mission: Mission): FeatureCollection<Polygon> {
   };
 }
 
+function glideFc(glide: GlideRing | null): FeatureCollection<Polygon> {
+  if (!glide || !(glide.radiusM > 0)) return { type: 'FeatureCollection', features: [] };
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: {},
+        geometry: {
+          type: 'Polygon',
+          coordinates: [circleRing(glide.lat, glide.lon, glide.radiusM)],
+        },
+      },
+    ],
+  };
+}
+
 function addLabel(
   map: MaplibreMap,
   entries: LabelEntry[],
@@ -559,6 +594,8 @@ export default function RehearsalMap({
   clockS = null,
   showMarker = false,
   markerTone = 'nominal',
+  glide = null,
+  attentionSeq = 0,
   follow = false,
   editor = false,
   fitPadding = { top: 48, right: 48, bottom: 48, left: 48 },
@@ -577,6 +614,7 @@ export default function RehearsalMap({
     clockS,
     showMarker,
     markerTone,
+    glide,
     follow,
     editor,
   });
@@ -587,6 +625,7 @@ export default function RehearsalMap({
     clockS,
     showMarker,
     markerTone,
+    glide,
     follow,
     editor,
   };
@@ -612,6 +651,7 @@ export default function RehearsalMap({
     (map.getSource(SRC.route) as GeoJSONSource | undefined)?.setData(routeFc(d.waypoints));
     (map.getSource(SRC.zones) as GeoJSONSource | undefined)?.setData(zonesFc(d.mission));
     (map.getSource(SRC.ring) as GeoJSONSource | undefined)?.setData(ringFc(d.mission));
+    (map.getSource(SRC.glide) as GeoJSONSource | undefined)?.setData(glideFc(d.glide));
     (map.getSource(SRC.flown) as GeoJSONSource | undefined)?.setData(
       flownFc(d.waypoints, d.weather, d.clockS),
     );
@@ -821,10 +861,27 @@ export default function RehearsalMap({
     map.flyTo({ center: [flyTarget.lon, flyTarget.lat], zoom: 10.5, duration: 900 });
   }, [mapReady, flyTarget]);
 
-  // Route, zones, link ring and aircraft data.
+  // Route, zones, link/glide rings and aircraft data.
   useEffect(() => {
     pushAll();
-  }, [pushAll, mission, waypoints, weather, clockS, showMarker, markerTone, follow]);
+  }, [pushAll, mission, waypoints, weather, clockS, showMarker, markerTone, glide, follow]);
+
+  // On a state increase the camera settles on the aircraft once; ordinary
+  // 10 Hz position updates continue to flow through pushAll without moving it.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !attentionSeq) return;
+    const d = dataRef.current;
+    if (!d.showMarker || d.clockS === null || d.waypoints.length < 2) return;
+    const total = currentPlan(d.waypoints, d.weather).totalS;
+    if (!(total > 0)) return;
+    const cp = missionClockPosition(
+      d.waypoints,
+      d.weather,
+      Math.max(0, Math.min(d.clockS, total - 1e-3)),
+    );
+    if (cp) map.easeTo({ center: [cp.lon, cp.lat], duration: 900 });
+  }, [mapReady, attentionSeq]);
 
   useEffect(() => {
     const map = mapRef.current;

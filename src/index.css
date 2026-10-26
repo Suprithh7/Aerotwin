@@ -167,3 +167,30 @@ body {
   border: 1px solid var(--edge);
   border-radius: 0;
 }
+
+/* State banner: one flash each second for five seconds, then steady. */
+@keyframes state-banner-flash {
+  0%,
+  49.9% {
+    background-color: var(--banner-flash);
+  }
+  50%,
+  100% {
+    background-color: transparent;
+  }
+}
+
+.state-banner-flash {
+  --banner-flash: rgb(201 146 46 / 0.26);
+  animation: state-banner-flash 1s steps(1, end) 5;
+}
+
+.state-banner-flash.state-banner-critical {
+  --banner-flash: rgb(196 68 63 / 0.3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .state-banner-flash {
+    animation: none;
+  }
+}

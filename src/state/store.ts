@@ -26,6 +26,7 @@ export interface SimStore {
   applySeed: () => void;
   setScenario: (s: Scenario, fuelKg?: number) => void;
   setFuelLoad: (kg: number) => void;
+  setEnvironment: (patch: { turbulence?: Scenario['turbulence']; isaDev?: number }) => void;
   setSelectedChannel: (c: ChannelId) => void;
   injectFault: (spec: FaultInput) => void;
   clearFault: (id: number) => void;
@@ -122,6 +123,10 @@ export const useSimStore = create<SimStore>((set, get) => {
       const v = Math.max(0, kg);
       set({ fuelLoadKg: v });
       send({ cmd: 'fuel', kg: v });
+    },
+    setEnvironment: (patch) => {
+      set({ scenario: { ...get().scenario, ...patch } });
+      send({ cmd: 'env', patch });
     },
     setSelectedChannel: (c) => set({ selectedChannel: c }),
     injectFault: (spec) => send({ cmd: 'inject', spec }),

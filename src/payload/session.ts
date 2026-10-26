@@ -70,6 +70,8 @@ export interface SessionTick {
   snapshot: Snapshot | null;
   alternates: AlternateRow[];
   jammed: boolean;
+  /** Instructor-held link rate at LINK_DEGRADE_FACTOR. */
+  linkDegraded?: boolean;
   forcedLanding: boolean;
 }
 
@@ -138,6 +140,7 @@ export class PayloadSession {
 
   private lastMissionS: number | null = null;
   private jammed = false;
+  private linkDegraded = false;
   private forcedLanding = false;
   private remoteZeroizeRequested = false;
   /** The live diagnosis can flicker; once an engine fault is named, keep it. */
@@ -198,6 +201,7 @@ export class PayloadSession {
     const dt = this.lastMissionS === null ? 0 : Math.max(0, input.missionS - this.lastMissionS);
     this.lastMissionS = input.missionS;
     this.jammed = input.jammed;
+    this.linkDegraded = input.linkDegraded ?? false;
     this.forcedLanding = input.forcedLanding;
 
     if (this.eraseMissionS === null) this.captureDue(input.missionS);
@@ -350,6 +354,7 @@ export class PayloadSession {
       altM: snapshot.scenario.altitude,
       gs: this.groundSite,
       jammed: this.jammed,
+      degraded: this.linkDegraded,
     });
   }
 
