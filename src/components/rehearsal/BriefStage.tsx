@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import RehearsalMap from './RehearsalMap';
 import StageHeader from './StageHeader';
+import JudgeIntro from './JudgeIntro';
 import { useRehearsalStore } from '../../rehearsal/store';
+import { useJudgeStore } from '../../rehearsal/judgeStore';
 import { SCENARIO_SCRIPTS } from '../../rehearsal/scripts';
 import { fmtHM } from '../../rehearsal/clock';
 import { factorSentence, weatherSentence } from '../../rehearsal/metrics';
@@ -1425,6 +1427,7 @@ export default function BriefStage() {
   const scenarioId = useRehearsalStore((s) => s.scenarioId);
   const setScenarioId = useRehearsalStore((s) => s.setScenarioId);
   const start = useRehearsalStore((s) => s.start);
+  const openJudgeIntro = useJudgeStore((s) => s.openIntro);
 
   const [tab, setTab] = useState<EditorTab>('route');
 
@@ -1749,9 +1752,20 @@ export default function BriefStage() {
             >
               Run rehearsal
             </button>
+            <button
+              className="mt-2 h-10 w-full border border-amber/60 bg-sheet font-mono text-[11px] uppercase tracking-[0.12em] text-amber disabled:border-rule disabled:text-ink-3"
+              disabled={waypoints.length < 2}
+              onClick={openJudgeIntro}
+            >
+              SIH judge demo
+            </button>
+            <span className="mt-1 block text-center font-mono text-[9px] uppercase tracking-[0.08em] text-ink-3">
+              Seeded evidence run
+            </span>
           </div>
         </aside>
       </div>
+      <JudgeIntro />
     </div>
   );
 }

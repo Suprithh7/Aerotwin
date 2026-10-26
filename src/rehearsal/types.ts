@@ -60,6 +60,8 @@ export interface DirectorInjectionSummary {
   surprise: boolean;
   /** Sim seconds from injection to the first system announcement. */
   detectedS: number | null;
+  /** Mission-clock time of the first announcement, when detected. */
+  detectedMissionS: number | null;
 }
 
 export interface DebriefResult {
@@ -76,4 +78,13 @@ export interface DebriefResult {
   ticks: TimelineTick[];
   dataGuard?: DataGuardDebrief;
   director?: DirectorInjectionSummary[];
+  /** Seeded RNG value used for this run. */
+  seed?: number;
+  /** Mission clock of the twin flag, if any. */
+  flagS?: number | null;
+  /** Mission clock of the first measured hard limit, if any. */
+  limitS?: number | null;
+  limitLabel?: string | null;
+  /** True when the run was launched from SIH judge mode. */
+  judge?: boolean;
 }

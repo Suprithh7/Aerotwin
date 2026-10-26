@@ -3,6 +3,8 @@ import RehearsalMap from './RehearsalMap';
 import DataGuardHud from './DataGuardHud';
 import DirectorPanel from './DirectorPanel';
 import EngineGauges, { type GaugeReading } from './EngineGauges';
+import JudgeCaption from './JudgeCaption';
+import TwinResiduals from './TwinResiduals';
 import { SyntheticChip } from './StageHeader';
 import { useSimStore, type SimStore } from '../../state/store';
 import { currentPlan, missionClockPosition, useMissionStore } from '../../mission/missionStore';
@@ -27,6 +29,14 @@ import {
 } from '../../rehearsal/presentation';
 import { buildDebrief, lifeDoseIncrement } from '../../rehearsal/metrics';
 import { scriptById } from '../../rehearsal/scripts';
+import {
+  JUDGE_FALLBACK_S,
+  JUDGE_GUARD_HOLD_S,
+  JUDGE_HOLD_S,
+  JUDGE_SEED,
+  type JudgeDetection,
+} from '../../rehearsal/judge';
+import { useJudgeStore } from '../../rehearsal/judgeStore';
 import { PayloadSession } from '../../payload/session';
 import type { PayloadView } from '../../payload/types';
 import type { DirectorInjectionSummary, Outcome } from '../../rehearsal/types';
@@ -44,7 +54,7 @@ import { cancelSpeech, playChime, speak, unlockAudio } from '../../rehearsal/aud
 import { glideRing as buildGlideRing, glideRingVisible } from '../../rehearsal/glide';
 import { wxAt } from '../../mission/mission';
 import { PHASES } from '../../sim/constants';
-import type { TurbulenceLevel } from '../../sim/types';
+import type { ChannelId, TurbulenceLevel } from '../../sim/types';
 
 const LIMIT_HOLD_MS = 2400;
 const TICKER_MS = 8000;
@@ -174,7 +184,10 @@ export default function FlyStage() {
 
   const directorOpen = useDirectorStore((s) => s.open);
   const directorInjections = useDirectorStore((s) => s.injections);
+  const directorDetections = useDirectorStore((s) => s.detections);
   const linkMode = useDirectorStore((s) => s.linkMode);
+  const judgeActive = useJudgeStore((s) => s.active);
+  const judgeAccelerated = useJudgeStore((s) => s.accelerated);
 
   const [armed, setArmed] = useState(false);
   const [payloadView, setPayloadView] = useState<PayloadView | null>(null);
@@ -189,6 +202,10 @@ export default function FlyStage() {
   const sessionRef = useRef<PayloadSession | null>(null);
   const navRowsRef = useRef<AlternateRow[]>([]);
   const prevRankRef = useRef(0);
+  const judgeAutoRef = useRef<{ detectedAt: number | null; done: boolean }>({
+    detectedAt: null,
+    done: false,
+  });
 
   const fireRef = useRef<FireFn>(() => {});
 
@@ -336,6 +353,7 @@ export default function FlyStage() {
   // A new run starts from a clean banner and rank history.
   useEffect(() => {
     prevRankRef.current = 0;
+    judgeAutoRef.current = { detectedAt: null, done: false };
     setBannerSeq(0);
     setAttentionSeq(0);
     cancelSpeech();
@@ -414,14 +432,18 @@ export default function FlyStage() {
       const dataGuard = sessionRef.current?.getDebrief();
       const directorState = useDirectorStore.getState();
       const activeAtFinish = activeInjectionContext(directorState.injections);
-      const directorSummary: DirectorInjectionSummary[] = directorState.injections.map((r) => ({
-        missionS: r.missionS,
-        label: r.label,
-        scope: r.scope,
-        surprise: r.surprise,
-        detectedS:
-          directorState.detections.find((d) => d.injectionId === r.id)?.latencyS ?? null,
-      }));
+      const judgeRun = useJudgeStore.getState().active;
+      const directorSummary: DirectorInjectionSummary[] = directorState.injections.map((r) => {
+        const detection = directorState.detections.find((d) => d.injectionId === r.id);
+        return {
+          missionS: r.missionS,
+          label: r.label,
+          scope: r.scope,
+          surprise: r.surprise,
+          detectedS: detection?.latencyS ?? null,
+          detectedMissionS: detection?.missionS ?? null,
+        };
+      });
       const debrief = buildDebrief({
         outcome,
         plannedS: ctx.plan.totalS,
@@ -436,6 +458,7 @@ export default function FlyStage() {
         sensorOnly: activeAtFinish.sensorOnly,
         ...(dataGuard ? { dataGuard } : {}),
         ...(directorSummary.length ? { director: directorSummary } : {}),
+        ...(judgeRun ? { seed: JUDGE_SEED, judge: true } : {}),
       });
       useRehearsalStore.getState().finish(debrief);
     };
@@ -504,6 +527,24 @@ export default function FlyStage() {
           tone: hudNow.state === 'CRITICAL' ? 'alert' : 'caution',
           tick: true,
         });
+      }
+
+      // Judge mode holds the flag on screen at 1x, then accelerates so the
+      // evidence card does not make the audience wait through the whole route.
+      if (useJudgeStore.getState().active) {
+        const auto = judgeAutoRef.current;
+        if (!auto.done) {
+          const firstDetection = useDirectorStore.getState().detections[0];
+          if (firstDetection && auto.detectedAt === null) auto.detectedAt = t;
+          const held =
+            auto.detectedAt !== null &&
+            t >= auto.detectedAt + JUDGE_HOLD_S + JUDGE_GUARD_HOLD_S;
+          if (held || (!firstDetection && t >= JUDGE_FALLBACK_S)) {
+            auto.done = true;
+            if (state.speed < 10) state.setSpeed(10);
+            useJudgeStore.getState().markAccelerated();
+          }
+        }
       }
 
       const session = sessionRef.current;
@@ -626,6 +667,23 @@ export default function FlyStage() {
     return [...set];
   }, [active, hud.state, diagnosis]);
 
+  const residualAffected = useMemo(() => {
+    const ids = new Set<ChannelId>();
+    if (active.sensorChannel) ids.add(active.sensorChannel);
+    for (const cylinder of affectedCylinders) {
+      ids.add(`cht${cylinder}` as ChannelId);
+    }
+    return [...ids];
+  }, [active, affectedCylinders]);
+
+  const judgeDetection: JudgeDetection | null = directorDetections.length
+    ? {
+        simS: directorDetections[0].simS,
+        missionS: directorDetections[0].missionS,
+        latencyS: directorDetections[0].latencyS,
+      }
+    : null;
+
   const glide = useMemo(() => {
     if (!ready || !shownSnap || !pos) return null;
     const glideMode = nav.rows.length > 0 && nav.rows[0].mode === 'GLIDE';
@@ -656,6 +714,11 @@ export default function FlyStage() {
   };
   const handleSurprise = () => {
     useDirectorStore.getState().surprise(plan.totalS);
+  };
+
+  const exitJudge = () => {
+    useJudgeStore.getState().stop();
+    useRehearsalStore.getState().toBrief();
   };
 
   return (
@@ -728,6 +791,12 @@ export default function FlyStage() {
                 <button
                   key={v}
                   className={`h-7 px-2 font-mono text-[11px] ${speed === v ? 'active' : ''}`}
+                  disabled={judgeActive && !judgeAccelerated && v !== 1}
+                  title={
+                    judgeActive && !judgeAccelerated && v !== 1
+                      ? 'Judge demo holds 1x until the twin flags the fault'
+                      : undefined
+                  }
                   onClick={() => setSpeed(v)}
                 >
                   {v}x
@@ -808,6 +877,15 @@ export default function FlyStage() {
           </div>
         </div>
 
+        {judgeActive ? (
+          <div className="absolute right-4 top-[190px]">
+            <TwinResiduals
+              readings={shownSnap?.readings ?? null}
+              affected={residualAffected}
+            />
+          </div>
+        ) : null}
+
         <div className="pointer-events-auto absolute bottom-8 right-4">
           <DataGuardHud
             view={payloadView}
@@ -829,6 +907,22 @@ export default function FlyStage() {
         <div className="absolute left-1/2 top-12 -translate-x-1/2">
           <Ticker />
         </div>
+
+        {judgeActive ? (
+          <div className="pointer-events-none absolute left-1/2 top-[130px] -translate-x-1/2">
+            <JudgeCaption
+              simT={simT}
+              detection={judgeDetection}
+              accelerated={judgeAccelerated}
+              guardState={payloadView?.guard.state ?? null}
+              guardReason={payloadView?.guard.reason ?? null}
+              securedMB={payloadView?.counters.atGroundMB ?? 0}
+              onboardMB={payloadView?.counters.onboardMB ?? 0}
+              eraseMissionS={payloadView?.eraseMissionS ?? null}
+              onExit={exitJudge}
+            />
+          </div>
+        ) : null}
       </div>
 
       {directorOpen ? (

@@ -1,6 +1,9 @@
 import { Fragment, useLayoutEffect, useRef, useState } from 'react';
 import StageHeader from './StageHeader';
+import EvidenceCard from './EvidenceCard';
 import { useRehearsalStore } from '../../rehearsal/store';
+import { useJudgeStore } from '../../rehearsal/judgeStore';
+import { useMissionStore } from '../../mission/missionStore';
 import { outcomeHeadline } from '../../rehearsal/metrics';
 import { fmtClock } from '../../rehearsal/clock';
 import { scriptById } from '../../rehearsal/scripts';
@@ -169,6 +172,8 @@ export default function DebriefStage() {
   const scenarioId = useRehearsalStore((s) => s.scenarioId);
   const start = useRehearsalStore((s) => s.start);
   const toBrief = useRehearsalStore((s) => s.toBrief);
+  const judgeActive = useJudgeStore((s) => s.active);
+  const missionName = useMissionStore((s) => s.mission.name);
   const trackRef = useRef<HTMLDivElement | null>(null);
   const [trackW, setTrackW] = useState(816);
 
@@ -206,6 +211,15 @@ export default function DebriefStage() {
   const totalS = Math.max(1, debrief.plannedS, debrief.flightS);
   const flownPct = Math.max(0, Math.min(100, (debrief.flightS / totalS) * 100));
   const scriptTitle = scriptById(scenarioId).title;
+
+  const replay = () => {
+    if (judgeActive) useJudgeStore.getState().restart();
+    else start();
+  };
+  const newMission = () => {
+    if (judgeActive) useJudgeStore.getState().stop();
+    toBrief();
+  };
   // The tick labels live above the single event row; close events are stacked
   // into up to three rows so a cluster of faults stays readable.
   const placed: { x0: number; x1: number }[][] = [[], [], []];
@@ -260,6 +274,10 @@ export default function DebriefStage() {
             />
           </div>
 
+          {debrief.judge ? (
+            <EvidenceCard debrief={debrief} missionName={missionName} scenarioTitle={scriptTitle} />
+          ) : null}
+
           <section className="mt-10">
             <div className="flex items-baseline justify-between gap-4">
               <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-dim">
@@ -310,13 +328,13 @@ export default function DebriefStage() {
           <div className="mt-8 flex items-center gap-3 border-t border-edge pt-6">
             <button
               className="h-10 bg-steel px-6 font-mono text-[12px] uppercase tracking-[0.14em] text-bg"
-              onClick={start}
+              onClick={replay}
             >
               REPLAY
             </button>
             <button
               className="h-10 border border-edge px-6 font-mono text-[12px] uppercase tracking-[0.14em] text-txt hover:border-steel"
-              onClick={toBrief}
+              onClick={newMission}
             >
               NEW MISSION
             </button>

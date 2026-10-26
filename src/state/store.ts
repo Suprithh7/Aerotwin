@@ -17,6 +17,7 @@ export interface SimStore {
   /** Increments whenever the worker confirms a config reset. */
   simEpoch: number;
   seedInput: string;
+  setSeedInput: (value: string) => void;
   scenario: Scenario;
   fuelLoadKg: number;
   selectedChannel: ChannelId;
@@ -97,6 +98,7 @@ export const useSimStore = create<SimStore>((set, get) => {
       send({ cmd: 'pause', value: p });
     },
     stepFrame: () => send({ cmd: 'step' }),
+    setSeedInput: (value) => set({ seedInput: value }),
     applySeed: () => {
       const seed = parseInt(get().seedInput, 10);
       if (Number.isFinite(seed)) {

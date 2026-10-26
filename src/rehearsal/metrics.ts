@@ -141,6 +141,8 @@ export interface BuildDebriefInput {
   sensorOnly: boolean;
   dataGuard?: DataGuardDebrief;
   director?: DirectorInjectionSummary[];
+  seed?: number;
+  judge?: boolean;
 }
 
 function computedLine(input: BuildDebriefInput): string {
@@ -185,5 +187,10 @@ export function buildDebrief(input: BuildDebriefInput): DebriefResult {
     ticks,
     ...(input.dataGuard ? { dataGuard: input.dataGuard } : {}),
     ...(input.director?.length ? { director: input.director } : {}),
+    ...(input.seed !== undefined ? { seed: input.seed } : {}),
+    flagS: input.flagS,
+    limitS: input.limitS,
+    limitLabel: input.limitLabel,
+    ...(input.judge ? { judge: true } : {}),
   };
 }
